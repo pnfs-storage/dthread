@@ -1,0 +1,29 @@
+#
+# dthread-config.cmake.in
+#
+
+set(dthread_AVAIL_COMPONENTS "@DTHREAD_SYNCOPS@")
+
+include (CMakeFindDependencyMacro)
+
+# always call find_dependency() for required external packages
+find_dependency(Threads)
+find_dependency(MPI)
+
+# handle optional components
+if("pshared" IN_LIST dthread_AVAIL_COMPONENTS)
+    # already found Threads, do not need to check for anything else
+    set(dthread_pshared_FOUND TRUE)
+else()
+    set(dthread_pshared_FOUND FALSE)
+endif()
+
+foreach(comp ${dthread_FIND_COMPONENTS})
+    if (NOT dthread_${comp}_FOUND AND dthread_FIND_REQUIRED_${comp})
+        set(dthread_FOUND FALSE)
+        string(APPEND dthread_NOT_FOUND_MESSAGE
+               "dthread required component ${comp} is missing\n")
+    endif()
+endforeach()
+
+include ("${CMAKE_CURRENT_LIST_DIR}/dthread-targets.cmake")
