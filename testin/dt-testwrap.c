@@ -7,6 +7,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -313,7 +314,7 @@ static int proctestcmd(pid_t child, int ignorefail, FILE *sfp, FILE *cfp) {
     size_t sln_sz, cln_sz;
     ssize_t rv;
     pid_t wrv;
-    int cstatus, eval;
+    int lcv, cstatus, eval;
 
     /* getline() setup */
     sln = cln = NULL;
@@ -364,9 +365,19 @@ no_script:
     printf("test EOF: test complete!\n");
     if (sln) free(sln);
     if (cln) free(cln);
-    wrv = waitpid(child, &cstatus, WNOHANG);
+    /* loop waitpid 5s in case child sent EOF but isn't fully exited yet */
+    for (lcv = 0 ; lcv < 50 ; lcv++) {
+         wrv = waitpid(child, &cstatus, WNOHANG);
+         if (wrv)
+             break;
+         poll(NULL, 0, 100);  /* sleep 0.1 sec */
+    }
     if (wrv != child) {
-        warn("waitpid failed");
+        if (wrv == 0)
+            warnx("waitpid failed: returned 0!");
+        else
+            warn("waitpid failed");
+
         return(1);
     }
     if (WIFEXITED(cstatus)) {
