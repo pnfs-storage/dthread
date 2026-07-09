@@ -134,3 +134,5 @@ add_subdirectory(libdthread)
 if (DTHREAD_TESTING)
     add_subdirectory(testin)
 endif()
+add_subdirectory(xthread)
+
