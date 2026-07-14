@@ -8,6 +8,60 @@ Xthreads provides one interface for both. A program runs with pthreads by
 default and with dthreads when given `--dthread`. Xthreads builds the dthread
 dispatch table and accounts for dthread's internal shared-memory overhead.
 
+## Execution flow
+
+```mermaid
+flowchart TB
+    subgraph Shared["Shared xthread application code"]
+        MAIN["main()"]
+        INIT["xthread_init()"]
+        SETUP["Parse options<br/>Calculate shared-memory requirement<br/>Build runtime configuration"]
+        RUN["xthread_run()"]
+        APP["application_main()<br/>Runs exactly once"]
+        WORK["Allocate application state<br/>Open/read input<br/>Create and join workers<br/>Print final results"]
+
+        MAIN --> INIT
+        SETUP --> RUN
+        APP --> WORK
+    end
+
+    subgraph Pthread["Pthread mode: one process"]
+        P_INIT["No operation"]
+        P_RUN["Call application_main() directly"]
+        P_DONE["Return from xthread_run()<br/>Continue main()"]
+    end
+
+    subgraph Dthread["Dthread mode: every MPI rank"]
+        D_INIT["Initialize MPI"]
+        D_RUN["Establish shared memory<br/>Start manager and MPI threads"]
+        D_APP["Rank 0 starts application thread"]
+        D_HELPERS["Other ranks service requests<br/>and run dispatched workers"]
+        D_STOP["Coordinated shutdown<br/>MPI_Finalize() then exit()"]
+    end
+
+    INIT -->|"pthread"| P_INIT
+    INIT -->|"--dthread"| D_INIT
+
+    P_INIT --> SETUP
+    D_INIT -->|"on every rank"| SETUP
+
+    RUN -->|"pthread"| P_RUN
+    P_RUN --> APP
+    WORK --> P_DONE
+
+    RUN -->|"--dthread on every rank"| D_RUN
+    D_RUN --> D_APP
+    D_RUN --> D_HELPERS
+    D_APP --> APP
+    WORK --> D_STOP
+    D_HELPERS --> D_STOP
+```
+
+The setup between `xthread_init()` and `xthread_run()` executes once in
+pthread mode and once per MPI rank in dthread mode. `application_main()`
+executes exactly once in either mode. In pthread mode `xthread_run()` returns;
+in dthread mode each rank eventually exits from inside `xthread_run()`.
+
 ## Porting checklist
 
 1. Replace `#include <pthread.h>` with:
@@ -19,13 +73,25 @@ dispatch table and accounts for dthread's internal shared-memory overhead.
 2. Call `xthread_init(&argc, &argv)` before parsing arguments. It removes
    `--dthread` from `argv`.
 
-3. Move the part of `main()` that allocates data, creates threads, joins them,
-   and cleans up into `application_main(int argc, char **argv)`. In dthread
-   mode this is the initial application thread on rank zero.
+3. Replace pthread types and calls with their xthread equivalents. A simple
+   search-and-replace of `pthread` with `xthread` is a useful starting point.
+   Compile and run the program without `--dthread` to find any pthread calls
+   that do not yet have xthread equivalents. Pthread mode should still work;
+   dthread mode is not expected to work yet.
 
-4. Replace pthread types and calls with their xthread equivalents, such as
-   `pthread_t` → `xthread_t`, `pthread_create()` → `xthread_create()`, and
-   `pthread_join()` → `xthread_join()`. Do the same for mutexes and barriers.
+4. Create a new function named `application_main()`:
+
+   ```c
+   static int application_main(int argc, char **argv)
+   {
+       /* Application execution will move here. */
+   }
+   ```
+
+   Keep argument parsing in `main()`. Move the part of `main()` that allocates
+   data, creates threads, joins them, and cleans up into `application_main()`.
+   In dthread mode this function is the initial application thread on rank
+   zero.
 
 5. Allocate anything worker threads may access with `xthread_calloc()` or
    `xthread_malloc()`. Release it with `xthread_free()`.
