@@ -11,14 +11,24 @@ dispatch table and accounts for dthread's internal shared-memory overhead.
 ## Execution flow
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+---
 flowchart TB
     subgraph Shared["Shared xthread application code"]
         MAIN["main()"]
         INIT["xthread_init()"]
-        SETUP["Parse options<br/>Calculate shared-memory requirement<br/>Build runtime configuration"]
+        SETUP["`Parse options
+        Calculate shared-memory requirement
+        Build runtime configuration`"]
         RUN["xthread_run()"]
-        APP["application_main()<br/>Runs exactly once"]
-        WORK["Allocate application state<br/>Open/read input<br/>Create and join workers<br/>Print final results"]
+        APP["`application_main()
+        Runs exactly once`"]
+        WORK["`Allocate application state
+        Open/read input
+        Create and join workers
+        Print final results`"]
 
         MAIN --> INIT
         SETUP --> RUN
@@ -28,15 +38,19 @@ flowchart TB
     subgraph Pthread["Pthread mode: one process"]
         P_INIT["No operation"]
         P_RUN["Call application_main() directly"]
-        P_DONE["Return from xthread_run()<br/>Continue main()"]
+        P_DONE["`Return from xthread_run()
+        Continue main()`"]
     end
 
     subgraph Dthread["Dthread mode: every MPI rank"]
         D_INIT["Initialize MPI"]
-        D_RUN["Establish shared memory<br/>Start manager and MPI threads"]
+        D_RUN["`Establish shared memory
+        Start manager and MPI threads`"]
         D_APP["Rank 0 starts application thread"]
-        D_HELPERS["Other ranks service requests<br/>and run dispatched workers"]
-        D_STOP["Coordinated shutdown<br/>MPI_Finalize() then exit()"]
+        D_HELPERS["`Other ranks service requests
+        and run dispatched workers`"]
+        D_STOP["`Coordinated shutdown
+        MPI_Finalize() then exit()`"]
     end
 
     INIT -->|"pthread"| P_INIT
