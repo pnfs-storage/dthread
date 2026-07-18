@@ -184,7 +184,7 @@ int rem_double_procarg(int op, dthread_argret_t *arg, void **pth_arg) {
      * for the new thread.
      */
     if (op == DTHREAD_PROC_ENCODE) {         /* encode arg inline */
-        int *i = (pth_arg) ? *pth_arg : NULL; 
+        int *i = (pth_arg) ? *pth_arg : NULL;
         if (i) {
             arg->dt_argret_type = DTHREAD_INLINE;
             arg->dt_inlinelen = sizeof(*i);
@@ -211,7 +211,7 @@ int rem_double_procarg(int op, dthread_argret_t *arg, void **pth_arg) {
             printf("rem_double_procarg: decode NULL\n");
             return(0);
         }
-        if (arg->dt_argret_type != DTHREAD_INLINE || 
+        if (arg->dt_argret_type != DTHREAD_INLINE ||
             arg->dt_inlinelen != sizeof(val)) {
             if (pth_arg)
                 *pth_arg = NULL;
@@ -262,7 +262,7 @@ int rem_double_procret(int op, dthread_argret_t *arg, void **pth_arg) {
      * later use by a join operation by some other thread.
      */
     if (op == DTHREAD_PROC_ENCODE) {         /* encode ret inline */
-        int *i = (pth_arg) ? *pth_arg : NULL; 
+        int *i = (pth_arg) ? *pth_arg : NULL;
         if (i) {
             arg->dt_argret_type = DTHREAD_INLINE;
             arg->dt_inlinelen = sizeof(*i);
@@ -288,7 +288,7 @@ int rem_double_procret(int op, dthread_argret_t *arg, void **pth_arg) {
             printf("rem_double_procret: decode NULL\n");
             return(0);
         }
-        if (arg->dt_argret_type != DTHREAD_INLINE || 
+        if (arg->dt_argret_type != DTHREAD_INLINE ||
             arg->dt_inlinelen != sizeof(*i)) {
             if (pth_arg)
                 *pth_arg = NULL;

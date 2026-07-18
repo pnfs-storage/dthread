@@ -141,34 +141,44 @@ typedef struct {
 } dthread_shmsrc_t;
 
 /*
- * shared memory mappings start with a metadata structure.
- * this structure may be embedded within a larger metadata struct.
+ * shared memory malloc operations and malloc metadata
  */
-#define DTHREAD_SHM_MD_MAGIC UINT64_C(0x647468626d643030) /* magic number */
-
-#define DTHREAD_SHM_SEG 0       /* low-level shmsrc segment mapping */
-
-typedef struct {
-    uint64_t shm_md_magic;      /* magic number (set when created) */
-    dthread_shmref_t self;      /* describes the entire block */
-    int alloctype;              /* allocation type used for mapping */
-    uint64_t allocated;         /* bytes allocated in block (optional) */
-    dthread_spinlock_t slock;   /* low-level spin lock */
-} dthread_shm_md_t;
 
 /*
- * shm malloc driver
+ * shm malloc driver ops.  we support both user-provided and
+ * internal operations.   the arena shmref arg points to malloc
+ * metadata (see below).
  */
 typedef struct {
     char *name;
     int (*init)(dthread_shmref_t *arena);
     int (*finalize)(dthread_shmref_t *arena);
     void *(*malloc)(dthread_shmref_t *arena, size_t size,
-                    dthread_shmref_t *ref);
+                    dthread_shmref_t *newref);
     void (*free)(dthread_shmref_t *arena, dthread_shmref_t *ref);
-    void *(*realloc)(dthread_shmref_t *arena, dthread_shmref_t ref_in,
-                     size_t new_size, dthread_shmref_t *ref);
-} dthread_shmalloc_ops_t;
+    void *(*realloc)(dthread_shmref_t *arena, dthread_shmref_t inref,
+                     size_t new_size, dthread_shmref_t *newref);
+} dthread_shm_alloc_ops_t;
+
+/*
+ * malloc metadata lives at the start of the malloc arena.
+ * the metadata starts with generic malloc info (described
+ * in the structure below).  this structure is typically
+ * embedded as the first entry in a malloc driver specific
+ * metadata structure.  all fields (except alock) will not
+ * change after they are set (at init time).
+ */
+#define DTHREAD_SHM_MD_MAGIC UINT64_C(0x647468626d643030) /* magic number */
+
+typedef struct {
+    uint64_t mdmagic;           /* magic number (set when created) */
+    dthread_shmref_t self;      /* our arena (including metadata) */
+    uint64_t min_uoffset;       /* min user data offset in arena */
+    uint64_t max_uoffset;       /* max user data offset in arena */
+    uint64_t badalign_bits;     /* bad bits for proper alignment */
+    int mopid;                  /* malloc-ops id (of malloc driver) */
+    dthread_spinlock_t alock;   /* alloc md spin lock */
+} dthread_shm_alloc_md_t;
 
 /*
  * native dthread arg/return type (argret)
@@ -241,8 +251,19 @@ typedef pthread_barrierattr_t dthread_barrierattr_t;
  */
 
 /*
- * shared memory allocation/references (within a shmid).
+ * shared memory references/pointer conversions (within a shmid).
  */
+
+/*
+ * turn a shmref into a local pointer.  len is optional (number of
+ * bytes the user expects).
+ */
+void *dthread_shmref2ptr(dthread_shmref_t *refp, uint64_t len);
+
+/*
+ * generate a shmref for an area of local memory, if possible.
+ */
+int dthread_ptr2shmref(void *ptr, uint64_t len, dthread_shmref_t *refp);
 
 /*
  * snapshot of current free space in a segment
@@ -250,38 +271,22 @@ typedef pthread_barrierattr_t dthread_barrierattr_t;
 int dthread_shm_segavail(uint64_t shmid, dthread_shmref_t *got);
 
 /*
- * turn a shmref into a local pointer.  len is optional (number of
- * bytes the user expects).
- */
-void *dthread_shm_ref2ptr(dthread_shmref_t *refp, uint64_t len);
-
-/*
- * generate a shmref for an area of local memory, if possible.
- */
-int dthread_shm_ptr2ref(void *ptr, uint64_t len, dthread_shmref_t *refp);
-
-/*
- * set default shmarena for shm_malloc, et al.
- */
-int dthread_default_shmarena(dthread_shmref_t *dflt);
-
-/*
  * create arena for shared memory allocator (directly from shmid)
  */
-int dthread_alloc_shmarena(uint64_t shmid, char *shmalloc_name,
-                           size_t size, dthread_shmref_t *newarena);
+int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
+                         size_t size, dthread_shmref_t *newarena);
 
 /*
  * set default arena (can only be set once)
  */
-int dthread_default_shmarena(dthread_shmref_t *dflt);
+int dthread_shm_set_defaultarena(dthread_shmref_t *dflt);
 
 /*
  * shared memory malloc.  returns local pointer to allocated memory
  * or NULL on error.  also fills in shmref, if provided.
  */
 void *dthread_shm_malloc(dthread_shmref_t *arena, uint64_t len,
-                         dthread_shmref_t *ref);
+                         dthread_shmref_t *newref);
 
 /*
  * shared memory free.
@@ -301,7 +306,7 @@ void *dthread_shm_realloc(dthread_shmref_t *arena, void *ptr, uint64_t len,
 /*
  * shared memory realloc by shmref
  */
-void *dthread_shm_realloc_ref(dthread_shmref_t *arena, dthread_shmref_t *ref,
+void *dthread_shm_realloc_ref(dthread_shmref_t *arena, dthread_shmref_t *inref,
                               uint64_t len, dthread_shmref_t *newref);
 
 /*
@@ -326,7 +331,7 @@ int dthread_init(int *argcp, char ***argvp);
  */
 void dthread_run(dthread_dispatch_t *dsps, int ndsps,
                  dthread_shmsrc_t *shms, int nshms,
-                 dthread_shmalloc_ops_t *usrmalloc, int nusrmalloc,
+                 dthread_shm_alloc_ops_t *usrmalloc, int nusrmalloc,
                  int syncop_id, int maxthreads,
                  int argc, char **argv);
 

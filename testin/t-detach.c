@@ -99,7 +99,7 @@ int app_main(int argc, char **argv) {
 
     /* XXX: begin internal API use (need shm malloc) */
     printf("app_main: use bootstrap allocator to allocate xret\n");
-    xret = dthread_shm_segalloc(0, sizeof(*xret), &xref);
+    xret = dthread_shmseg_alloc(0, sizeof(*xret), &xref);
     if (xret == NULL) {
         printf("app_main: bootstrap allocator failed!\n");
         return(1);
@@ -131,7 +131,7 @@ int app_main(int argc, char **argv) {
     } else {
         printf("app_main: created!  sleep 4 to wait for thread to stop\n");
     }
-    
+
     sleep(4);
 
     if (xret->dt_argret_type != DTHREAD_INLINE || xret->u.dt_inline[0] != 0) {
@@ -158,7 +158,7 @@ int app_main(int argc, char **argv) {
             } else {
                 printf("app_main: join failed! (%s)\n", strerror(rv));
                 errcnt++;
-            } 
+            }
         }
     }
 
@@ -182,7 +182,7 @@ dthread_argret_t rem_sleep11(dthread_argret_t *dt_arg) {
 
     if (dt_arg->dt_argret_type != DTHREAD_SHMREF)
         errx(1, "rem_sleep11: bad arg!  should not happen\n");
-    xret = dthread_shm_ref2ptr(&dt_arg->u.dt_shm, sizeof(dthread_argret_t));
+    xret = dthread_shmref2ptr(&dt_arg->u.dt_shm, sizeof(dthread_argret_t));
     if (xret == NULL)
         errx(1, "rem_sleep11: bad arg mapping!  should not happen\n");
 

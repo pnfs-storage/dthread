@@ -429,7 +429,7 @@ void dtq_finalize() {
             free(req);
         }
     }
-    
+
     /* clear req free list */
     while ((req = TAILQ_FIRST(&dtrs->dtq.reqfree)) != NULL) {
         TAILQ_REMOVE(&dtrs->dtq.reqfree, req, rl);

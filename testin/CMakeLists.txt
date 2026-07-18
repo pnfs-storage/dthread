@@ -60,7 +60,7 @@ function(dthread_test testname)
     if (DTT_TESTSCRIPT)
         if (NOT EXISTS "${DTT_TESTSCRIPT}")
            if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${DTT_TESTSCRIPT}")
-               set(DTT_TESTSCRIPT 
+               set(DTT_TESTSCRIPT
                     "${CMAKE_CURRENT_SOURCE_DIR}/${DTT_TESTSCRIPT}")
            else()
                message(FATAL_ERROR
@@ -91,7 +91,7 @@ function(dthread_test testname)
     else()
         set_tests_properties(${testname} PROPERTIES TIMEOUT 60)
     endif()
-    
+
     if (DTT_TESTSCRIPT)
         set(envs DTHREAD_MLOG_STDERRPRI=DBUG DTHREAD_MLOG_DEFPRI=ERR
                  DTHREAD_MLOG_DIR=/tmp DTHREAD_MLOG_MASK=MGR=DBUG)

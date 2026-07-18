@@ -85,7 +85,7 @@ typedef struct {
     dthread_t c_thread;                   /* thread being created */
     int c_peer;                           /* rank that sent CREATE */
     uint32_t c_xidseq;                    /* xidseq of CREATE request */
-    
+
 } dthread_createinfo_t;
 
 /*

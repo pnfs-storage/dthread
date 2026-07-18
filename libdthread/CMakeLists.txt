@@ -37,7 +37,7 @@
 # list of libdthread source files
 #
 set (libdthread-src dt_init.c dt_mgrthread.c dt_mpithread.c dt_ops.c
-     dt_queuing.c dt_shmops.c dt_syncops.c dt_threadops.c)
+     dt_queuing.c dt_segops.c dt_shmops.c dt_syncops.c dt_threadops.c)
 if(DTHREAD_SYNC_PSHARED)
     list(APPEND libdthread-src dt_syncops_pshared.c)
 endif()
@@ -98,7 +98,7 @@ endif()
 # package generation
 #
 write_basic_package_version_file(
-    dthread-config-version.cmake 
+    dthread-config-version.cmake
     VERSION ${LIBDTHREAD_VERSION}
     COMPATIBILITY AnyNewerVersion)
 configure_file (dthread-config.cmake.in		# cfg file for find_package

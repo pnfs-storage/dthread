@@ -5,6 +5,8 @@
 
 #include <err.h>
 #include <errno.h>
+#include <stdalign.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,42 +80,42 @@ int app_main(int argc, char **argv) {
     errcnt = 0;
     printf("app_main: running\n");
 
-    rv = dthread_alloc_shmarena(0, "nope", 8192, &ar);
+    rv = dthead_shm_new_arena(0, "nope", 8192, &ar);
     if (rv == ENOENT) {
-        printf("dthread_alloc_shmarena: handled invalid allocator OK!\n");
+        printf("dthead_shm_new_arena: handled invalid allocator OK!\n");
     } else {
-        printf("dthread_alloc_shmarena: invalid allocator: unexpected %d", rv);
+        printf("dthead_shm_new_arena: invalid allocator: unexpected %d", rv);
         errcnt++;
     }
 
-    rv = dthread_alloc_shmarena(0, "break", 100, &ar);
+    rv = dthead_shm_new_arena(0, "break", 100, &ar);
     if (rv == EINVAL) {
-        printf("dthread_alloc_shmarena: handled too small allocator OK!\n");
+        printf("dthead_shm_new_arena: handled too small allocator OK!\n");
     } else {
-        printf("dthread_alloc_shmarena: small alloc: unexpected %d", rv);
+        printf("dthead_shm_new_arena: small alloc: unexpected %d", rv);
         errcnt++;
     }
 
-    rv = dthread_alloc_shmarena(0, "break", 0, &ar);
+    rv = dthead_shm_new_arena(0, "break", 0, &ar);
     if (rv) {
-        printf("dthread_alloc_shmarena: unexpected fail %s\n", strerror(rv));
+        printf("dthead_shm_new_arena: unexpected fail %s\n", strerror(rv));
         errcnt++;
         goto done;
     }
 
     printf("break: arena <%" PRIu64 ",%" PRIu64 ",%" PRIu64 ">\n",
            ar.dt_shmid, ar.dt_offset, ar.dt_length);
-    vp = dthread_shm_ref2ptr(&ar, 0);
+    vp = dthread_shmref2ptr(&ar, 0);
     printf("break: base = %p\n", vp);
-    if (dthread_shm_ptr2ref(vp, ar.dt_length, &ar2) != 0) {
-        printf("dthread_shm_ptr2ref: arena check failed\n");
+    if (dthread_ptr2shmref(vp, ar.dt_length, &ar2) != 0) {
+        printf("dthread_ptr2shmref: arena check failed\n");
         errcnt++;
     } else if (ar.dt_shmid != ar2.dt_shmid || ar.dt_offset != ar2.dt_offset ||
                ar.dt_length != ar2.dt_length) {
-        printf("dthread_shm_ptr2ref: arena mismatch!\n");
+        printf("dthread_shm_ptr2shmref: arena mismatch!\n");
         errcnt++;
     } else {
-        printf("dthread_shm_ptr2ref: arena check OK!\n");
+        printf("dthread_ptr2shmref: arena check OK!\n");
     }
 
     p[0] = dthread_shm_malloc(NULL, 1, &pr[0]);
@@ -124,11 +126,11 @@ int app_main(int argc, char **argv) {
         printf("dthread_shm_malloc: default arena ok\n");
     }
 
-    rv = dthread_default_shmarena(&ar);
+    rv = dthread_shm_set_defaultarena(&ar);
     if (rv == 0) {
-        printf("dthread_default_shmarena: default arena set\n");
+        printf("dthread_shm_set_defaultarena: default arena set\n");
     } else {
-        printf("dthread_default_shmarena: default arena failed %d\n", rv);
+        printf("dthread_shm_set_defaultarena: default arena failed %d\n", rv);
         errcnt++;
     }
 
@@ -138,35 +140,35 @@ int app_main(int argc, char **argv) {
         errcnt++;
     } else {
         printf("dthread_shm_malloc: alloc p[0] OK!  %p\n", p[0]);
-        printf("dthread_shm_malloc: p0 <%" PRIu64 ",%" PRIu64 ",%" 
+        printf("dthread_shm_malloc: p0 <%" PRIu64 ",%" PRIu64 ",%"
                PRIu64 ">\n", pr[0].dt_shmid, pr[0].dt_offset, pr[0].dt_length);
     }
 
-    vp = dthread_shm_ref2ptr(&pr[0], 0);
+    vp = dthread_shmref2ptr(&pr[0], 0);
     if (vp != p[0]) {
-        printf("dthread_shm_ref2ptr on p0 failed! vp=%p, p[0]=%p\n", vp, p[0]);
+        printf("dthread_shmref2ptr on p0 failed! vp=%p, p[0]=%p\n", vp, p[0]);
         errcnt++;
     } else {
-        printf("dthread_shm_ref2ptr on p0 OK!\n");
+        printf("dthread_shmref2ptr on p0 OK!\n");
     }
-    
+
     p[1] = dthread_shm_malloc(NULL, 128, &pr[1]);
     if (p[1] == NULL) {
         printf("dthread_shm_malloc: alloc p[1] failed!\n");
         errcnt++;
     } else {
         printf("dthread_shm_malloc: alloc p[1] OK!  %p\n", p[1]);
-        printf("dthread_shm_malloc: p1 <%" PRIu64 ",%" PRIu64 ",%" 
+        printf("dthread_shm_malloc: p1 <%" PRIu64 ",%" PRIu64 ",%"
                PRIu64 ">\n", pr[1].dt_shmid, pr[1].dt_offset, pr[1].dt_length);
     }
 
-    if (p[0] + sizeof(uint32_t) * 4 + sizeof(uint64_t) != p[1]) {
+    if (p[0] + alignof(max_align_t) + (sizeof(uint32_t) * 4) != p[1]) {
         printf("dthread_shm_malloc: p[1] in unexpected loc for break!\n");
         errcnt++;
     } else {
         printf("dthread_shm_malloc: p[1] location OK!\n");
     }
-    
+
     p[2] = dthread_shm_malloc(NULL, 1, &pr[2]);
     if (p[0] == NULL) {
         printf("dthread_shm_malloc: alloc p[2] failed!\n");
@@ -174,16 +176,16 @@ int app_main(int argc, char **argv) {
     } else {
         printf("dthread_shm_malloc: alloc p[2] OK!  %p\n", p[2]);
     }
-    
-    if (p[1] + sizeof(uint32_t) * 4 + 128 != p[2]) {
+
+    if (p[1] + 128 + (sizeof(uint32_t) * 4) != p[2]) {
         printf("dthread_shm_malloc: p[2] in unexpected loc for break!\n");
         errcnt++;
     } else {
         printf("dthread_shm_malloc: p[2] location OK!\n");
-        printf("dthread_shm_malloc: p2 <%" PRIu64 ",%" PRIu64 ",%" 
+        printf("dthread_shm_malloc: p2 <%" PRIu64 ",%" PRIu64 ",%"
                PRIu64 ">\n", pr[2].dt_shmid, pr[2].dt_offset, pr[2].dt_length);
     }
-    
+
     printf("freeing ALL memory to reset break\n");
     dthread_shm_free(NULL, p[1]);
     dthread_shm_free_ref(NULL, &pr[0]);

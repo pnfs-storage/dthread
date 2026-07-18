@@ -69,7 +69,7 @@ static size_t strgen(char **newstr, ...) {
     va_list ap;
     size_t newlen;
     char *n, *nstr, *part;
- 
+
     /* pass 1: compute length we need */
     va_start(ap, newstr);
     newlen = 1;   /* include byte for null termination */
@@ -106,7 +106,7 @@ static int dthread_shm_bootstrap(dthread_shm_bootstrap_t *sboot,
     uint64_t gtsize;
 
     gtsize = maxthreads * sizeof(dtrs->gtab[0]);
-    ptr = dthread_shm_segalloc(0, gtsize, &sboot->boot_gtab);
+    ptr = dthread_shmseg_alloc(0, gtsize, &sboot->boot_gtab);
     if (ptr == NULL)
         return(ENOMEM);
     memset(ptr, 0, gtsize);
@@ -155,7 +155,7 @@ int dthread_init(int *argcp, char ***argvp) {
  */
 void dthread_run(dthread_dispatch_t *dsps, int ndsps,
                  dthread_shmsrc_t *shms, int nshms,
-                 dthread_shmalloc_ops_t *usrmops, int nusrmops,
+                 dthread_shm_alloc_ops_t *usrmops, int nusrmops,
                  int syncop_id, int maxthreads,
                  int argc, char **argv) {
     int lcv, rv, success, total;
@@ -258,7 +258,7 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
     /* MPI_Bcast distributes shmboot, acts as a barrier to let r0 go first */
     rv = 0;                            /* quiet compiler warning */
     if (dtrs->mpi_rank == 0) {
-        rv = dthread_shm_establish(shms, nshms);
+        rv = dthread_shmseg_establish(shms, nshms);
         if (rv == 0) {
             rv = dthread_shm_bootstrap(&shmboot, maxthreads);
         }
@@ -268,7 +268,7 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     if (dtrs->mpi_rank != 0) {
-        rv = dthread_shm_establish(shms, nshms);
+        rv = dthread_shmseg_establish(shms, nshms);
     }
     success = (rv == 0) ? 1 : 0;
     rv = MPI_Allreduce(&success, &total, 1, MPI_INT,
@@ -296,7 +296,7 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
 
     /* setup the thread tables */
     dtrs->nmaxthread = maxthreads;
-    dtrs->gtab = dthread_shm_ref2ptr(&shmboot.boot_gtab, 0);
+    dtrs->gtab = dthread_shmref2ptr(&shmboot.boot_gtab, 0);
     dtrs->ltab = calloc(maxthreads, sizeof(dtrs->ltab[0]));
     if (dtrs->gtab == NULL || dtrs->ltab == NULL) {
         fprintf(stderr, "dthread_run: %d: thread table error (%p,%p)\n",
