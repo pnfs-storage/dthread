@@ -201,7 +201,7 @@ static void break_free(dthread_shmref_t *arena, dthread_shmref_t *ref) {
      * caller has already validated ref is in arena and alignment is ok.
      * we need to check for header space.
      */
-    if (ref->dt_offset < arena->dt_offset + bmd->hdrlen) {
+    if (ref->dt_offset < bmd->amd.min_uoffset + bmd->hdrlen) {
         mlog(SHM_ERR, "break_free: input ref %p has no header", ref);
         return;
     }
@@ -243,7 +243,7 @@ static void *break_realloc(dthread_shmref_t *arena, dthread_shmref_t inref,
      * caller has already validated inref is in arena and alignment is ok.
      * we need to check for header space.
      */
-    if (inref.dt_offset < arena->dt_offset + bmd->hdrlen) {
+    if (inref.dt_offset < bmd->amd.min_uoffset + bmd->hdrlen) {
         mlog(SHM_ERR, "break_free: input ref ptr has no header room");
         return(NULL);
     }
