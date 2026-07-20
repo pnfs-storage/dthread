@@ -100,6 +100,7 @@ int app_main(int argc, char **argv) {
         errcnt++;
     }
 
+    /* do 3 allocations of 481, should be handled by 1 call to morecore() */
     for (lcv = 0 ; lcv < 3; lcv++) {
         ptr[lcv] = dthread_shm_malloc(NULL, 481, &pref[lcv]);
         if (ptr[lcv] == NULL) {
@@ -110,13 +111,17 @@ int app_main(int argc, char **argv) {
         printf("dthread_shm_malloc: OK %d\n", lcv);
     }
 
+    /* free last alloc, will put it on the free list */
     ps = ptr[2];
     psav = pref[2];
     dthread_shm_free(NULL, ptr[2]);
 
+    /* do more allocs of 481 */
     for (lcv = 2 ; lcv < 5; lcv++) {
         ptr[lcv] = dthread_shm_malloc(NULL, 481, &pref[lcv]);
+
         if (lcv == 2) {
+            /* this should reclaim the block we just put on free list */
             if (ptr[2] != ps || memcmp(&psav, &pref[2], sizeof(psav)) != 0) {
                 printf("dthread_shm_malloc: free list alloc FAILED %d\n", lcv);
                 printf(" -- check: %d %d\n", ptr[2] != ps,
@@ -126,6 +131,7 @@ int app_main(int argc, char **argv) {
                 printf("dthread_shm_malloc: free list alloc OK %d\n", lcv);
             }
         }
+
         if (ptr[lcv] == NULL) {
             printf("dthread_shm_malloc: FAILED %d\n", lcv);
             errcnt++;
@@ -134,6 +140,7 @@ int app_main(int argc, char **argv) {
         printf("dthread_shm_malloc: OK %d\n", lcv);
     }
 
+    /* realloc of same size should give same result */
     nptr = dthread_shm_realloc(NULL, ptr[4], 481, &nref);
     if (nptr != ptr[4] || memcmp(&nref, &pref[4], sizeof(nref)) != 0) {
         printf("realloc-no-change: FAILED! %d %d\n", nptr != ptr[4],
@@ -146,8 +153,9 @@ int app_main(int argc, char **argv) {
 #define MSG "testing realloc!"
     memcpy(nptr, MSG, sizeof(MSG));
 
+    /* try growing the allocation */
     nptr = dthread_shm_realloc(NULL, nptr, 4000, &nref);
-    if (nptr == NULL || nptr == ptr[4] || 
+    if (nptr == NULL || nptr == ptr[4] ||
         memcmp(nptr, MSG, sizeof(MSG)) != 0) {
         printf("grow realloc failed!  %p\n", nptr);
         errcnt++;
@@ -158,8 +166,9 @@ int app_main(int argc, char **argv) {
 #define MSG2 "REtesting realloc!!"
     memcpy(nptr, MSG2, sizeof(MSG2));
 
+    /* try shrinking the allocation to a smaller bucket size */
     sptr = dthread_shm_realloc(NULL, nptr, 64, &sref);
-    if (sptr == NULL || sptr == nptr || 
+    if (sptr == NULL || sptr == nptr ||
         memcmp(sptr, MSG2, sizeof(MSG2)) != 0) {
         printf("shrink realloc failed!  %p\n", sptr);
         errcnt++;
@@ -167,6 +176,7 @@ int app_main(int argc, char **argv) {
         printf("shrink realloc AOK!\n");
     }
 
+    /* that last 481 buffer we freed should be hanging out on free list */
     nptr = dthread_shm_malloc(NULL, 481, &nref);
     if (nptr != ptr[4] || memcmp(&nref, &pref[4], sizeof(nref)) != 0) {
         printf("orig size freelist reclaim failed!\n");

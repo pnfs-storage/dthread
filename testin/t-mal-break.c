@@ -162,6 +162,7 @@ int app_main(int argc, char **argv) {
                PRIu64 ">\n", pr[1].dt_shmid, pr[1].dt_offset, pr[1].dt_length);
     }
 
+    /* we know break internal layout, so we know where p[1] should be */
     if (p[0] + alignof(max_align_t) + (sizeof(uint32_t) * 4) != p[1]) {
         printf("dthread_shm_malloc: p[1] in unexpected loc for break!\n");
         errcnt++;
@@ -177,6 +178,7 @@ int app_main(int argc, char **argv) {
         printf("dthread_shm_malloc: alloc p[2] OK!  %p\n", p[2]);
     }
 
+    /* we also know where p[2] should be... */
     if (p[1] + 128 + (sizeof(uint32_t) * 4) != p[2]) {
         printf("dthread_shm_malloc: p[2] in unexpected loc for break!\n");
         errcnt++;
@@ -192,7 +194,7 @@ int app_main(int argc, char **argv) {
     dthread_shm_free(NULL, p[2]);
     printf("done freeing memory\n");
 
-    printf("duplicating allocations\n");
+    printf("duplicating previous allocations\n");
     q[0] = dthread_shm_malloc(NULL, 1, NULL);
     q[1] = dthread_shm_malloc(NULL, 128, NULL);
     q[2] = dthread_shm_malloc(NULL, 1, NULL);
@@ -200,6 +202,7 @@ int app_main(int argc, char **argv) {
 
     printf("dthread_shm_malloc: q: %p, %p, %p\n", q[0], q[1], q[2]);
 
+   /* the dup allocations should match the initial ones! */
    if (p[0] != q[0] || p[1] != q[1] || p[2] != q[2]) {
         printf("dthread_shm_malloc: q allocations did NOT match\n");
         errcnt++;
