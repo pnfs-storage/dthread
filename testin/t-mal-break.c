@@ -208,6 +208,6 @@ int app_main(int argc, char **argv) {
    }
 
 done:
-    printf("app_main: return 0\n");
+    printf("app_main: return %d\n", errcnt);
     return((errcnt) ? 1 : 0);
 }
