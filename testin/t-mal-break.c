@@ -80,25 +80,25 @@ int app_main(int argc, char **argv) {
     errcnt = 0;
     printf("app_main: running\n");
 
-    rv = dthead_shm_new_arena(0, "nope", 8192, &ar);
+    rv = dthread_shm_new_arena(0, "nope", 8192, &ar);
     if (rv == ENOENT) {
-        printf("dthead_shm_new_arena: handled invalid allocator OK!\n");
+        printf("dthread_shm_new_arena: handled invalid allocator OK!\n");
     } else {
-        printf("dthead_shm_new_arena: invalid allocator: unexpected %d", rv);
+        printf("dthread_shm_new_arena: invalid allocator: unexpected %d", rv);
         errcnt++;
     }
 
-    rv = dthead_shm_new_arena(0, "break", 100, &ar);
+    rv = dthread_shm_new_arena(0, "break", 100, &ar);
     if (rv == EINVAL) {
-        printf("dthead_shm_new_arena: handled too small allocator OK!\n");
+        printf("dthread_shm_new_arena: handled too small allocator OK!\n");
     } else {
-        printf("dthead_shm_new_arena: small alloc: unexpected %d", rv);
+        printf("dthread_shm_new_arena: small alloc: unexpected %d", rv);
         errcnt++;
     }
 
-    rv = dthead_shm_new_arena(0, "break", 0, &ar);
+    rv = dthread_shm_new_arena(0, "break", 0, &ar);
     if (rv) {
-        printf("dthead_shm_new_arena: unexpected fail %s\n", strerror(rv));
+        printf("dthread_shm_new_arena: unexpected fail %s\n", strerror(rv));
         errcnt++;
         goto done;
     }

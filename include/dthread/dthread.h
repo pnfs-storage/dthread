@@ -273,8 +273,8 @@ int dthread_shm_segavail(uint64_t shmid, dthread_shmref_t *got);
 /*
  * create arena for shared memory allocator (directly from shmid)
  */
-int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
-                         size_t size, dthread_shmref_t *newarena);
+int dthread_shm_new_arena(uint64_t shmid, char *shmalloc_name,
+                          size_t size, dthread_shmref_t *newarena);
 
 /*
  * set default arena (can only be set once)

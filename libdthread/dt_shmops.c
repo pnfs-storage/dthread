@@ -887,7 +887,7 @@ int dthread_shm_set_defaultarena(dthread_shmref_t *dflt) {
  * allocate a new shared memory arena for shmalloc ops.  return 0
  * on success.
  */
-int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
+int dthread_shm_new_arena(uint64_t shmid, char *shmalloc_name,
                          size_t size, dthread_shmref_t *newarena) {
     int mopid, rv;
     dthread_shm_alloc_ops_t *mops;
@@ -895,26 +895,26 @@ int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
 
     /* size should be at least one page */
     if (size && size < dtrs->pagesize) {
-        mlog(SHM_ERR, "dthead_shm_new_arena: size too small");
+        mlog(SHM_ERR, "dthread_shm_new_arena: size too small");
         return(EINVAL);
     }
 
     /* use name to select correct operations */
     mopid = dthread_get_mopid(shmalloc_name);
     if (mopid < 0) {
-        mlog(SHM_ERR, "dthead_shm_new_arena: bad type %s", shmalloc_name);
+        mlog(SHM_ERR, "dthread_shm_new_arena: bad type %s", shmalloc_name);
         return(ENOENT);
     }
     mops = mopid2ops(mopid);
     if (!mops) {
-        mlog(SHM_ERR, "dthead_shm_new_arena: no mops (%s)", shmalloc_name);
+        mlog(SHM_ERR, "dthread_shm_new_arena: no mops (%s)", shmalloc_name);
         return(ENOENT);
     }
 
     /* use low-level segment allocator to get block of shm */
     md = dthread_shmseg_alloc(shmid, size, newarena);
     if (!md) {
-        mlog(SHM_ERR, "dthead_shm_new_arena: %s: segalloc failed",
+        mlog(SHM_ERR, "dthread_shm_new_arena: %s: segalloc failed",
              shmalloc_name);
         return(ENOMEM);
     }
@@ -932,7 +932,7 @@ int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
     rv = mops->init(newarena);    /* should not fail */
     if (rv != 0) {
         /* XXX: no way to give back segment memory, so it's lost... */
-        mlog(SHM_CRIT, "dthead_shm_new_arena: %s init fail (%s), sz=%zd",
+        mlog(SHM_CRIT, "dthread_shm_new_arena: %s init fail (%s), sz=%zd",
              shmalloc_name, strerror(rv), size);
     }
 
