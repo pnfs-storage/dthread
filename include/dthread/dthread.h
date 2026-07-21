@@ -277,6 +277,15 @@ int dthread_shm_new_arena(uint64_t shmid, char *shmalloc_name,
                           size_t size, dthread_shmref_t *newarena);
 
 /*
+ * finalize arena
+ *
+ * currently finalize does not do anything other than log some stats
+ * when logging is enabled (e.g. for debugging), so calling it is
+ * not required.
+ */
+int dthread_shm_finalize_arena(dthread_shmref_t *arena);
+
+/*
  * set default arena (can only be set once)
  */
 int dthread_shm_set_defaultarena(dthread_shmref_t *dflt);

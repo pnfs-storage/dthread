@@ -1017,6 +1017,24 @@ static dthread_shm_alloc_ops_t *dthread_shm_validate_args(char *tag,
 }
 
 /*
+ * finalize arena
+ *
+ * currently finalize does not do anything other than log some stats
+ * when logging is enabled (e.g. for debugging), so calling it is
+ * not required.
+ */
+int dthread_shm_finalize_arena(dthread_shmref_t *arena) {
+    dthread_shm_alloc_md_t *md;
+    dthread_shm_alloc_ops_t *mops;
+
+    mops = dthread_shm_validate_args("finalize", &arena, &md, NULL, NULL, NULL);
+    if (mops == NULL)
+        return(EINVAL);
+
+    return( mops->finalize(arena) );
+}
+
+/*
  * arena-based shared memory allocate
  */
 void *dthread_shm_malloc(dthread_shmref_t *arena, uint64_t len,
