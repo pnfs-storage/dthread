@@ -113,7 +113,7 @@ if (DTHREAD_TESTING)
 endif()
 
 # xthread lib
-option(DTHREAD_XTHREAD "Enable xthread pthread/dthread adaptor lib")
+option(DTHREAD_XTHREAD "Enable xthread pthread/dthread adaptor lib" ON)
 
 # cmake build type, shared lib option
 if (NOT CMAKE_BUILD_TYPE)

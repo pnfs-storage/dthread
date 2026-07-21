@@ -1,4 +1,4 @@
-#include "xthread.h"
+#include <dthread/xthread.h>
 
 #include <errno.h>
 #include <limits.h>
