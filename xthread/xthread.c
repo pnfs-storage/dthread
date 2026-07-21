@@ -71,7 +71,7 @@ static int xthread_pointer_proc(int operation,
         }
 
         argret->dt_argret_type = DTHREAD_SHMREF;
-        return dthread_shm_ptr2ref(*pointer, 0, &argret->u.dt_shm);
+        return dthread_ptr2shmref(*pointer, 0, &argret->u.dt_shm);
 
     case DTHREAD_PROC_DECODE:
         if (argret->dt_argret_type == DTHREAD_NODATA) {
@@ -84,7 +84,7 @@ static int xthread_pointer_proc(int operation,
         if (pointer == NULL)
             return 0;
 
-        *pointer = dthread_shm_ref2ptr(&argret->u.dt_shm, 0);
+        *pointer = dthread_shmref2ptr(&argret->u.dt_shm, 0);
         return *pointer == NULL ? EINVAL : 0;
 
     case DTHREAD_PROC_FREE:
@@ -100,14 +100,14 @@ static int xthread_dthread_application_main(int argc, char **argv)
     dthread_shmref_t arena;
     int rv;
 
-    rv = dthread_alloc_shmarena(0, "break", 0, &arena);
+    rv = dthread_shm_new_arena(0, "break", 0, &arena);
     if (rv != 0) {
         fprintf(stderr, "xthread: cannot create shared allocator: %s\n",
                 strerror(rv));
         return rv;
     }
 
-    rv = dthread_default_shmarena(&arena);
+    rv = dthread_shm_set_defaultarena(&arena);
     if (rv != 0) {
         fprintf(stderr, "xthread: cannot select shared allocator: %s\n",
                 strerror(rv));
@@ -474,7 +474,7 @@ int xthread_ptr_to_ref(void *ptr, size_t length, xthread_ref_t *ref)
         return EINVAL;
 
     if (use_dthreads)
-        return dthread_shm_ptr2ref(ptr, length, &ref->value.dthread);
+        return dthread_ptr2shmref(ptr, length, &ref->value.dthread);
 
     ref->value.pthread.pointer = ptr;
     ref->value.pthread.length = length;
@@ -487,8 +487,8 @@ void *xthread_ref_to_ptr(const xthread_ref_t *ref, size_t length)
         return NULL;
 
     if (use_dthreads) {
-        return dthread_shm_ref2ptr((dthread_shmref_t *)&ref->value.dthread,
-                                   length);
+        return dthread_shmref2ptr((dthread_shmref_t *)&ref->value.dthread,
+                                  length);
     }
 
     if (length > ref->value.pthread.length)

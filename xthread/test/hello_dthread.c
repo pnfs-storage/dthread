@@ -114,13 +114,13 @@ static void *thread_hello(void *opaque)
     int rv;
 
     /* Each rank converts portable references to its own local addresses. */
-    pid_t *array = dthread_shm_ref2ptr(
+    pid_t *array = dthread_shmref2ptr(
         &arg->array_ref, arg->array_size * sizeof(*array));
-    pid_t *thread_pids = dthread_shm_ref2ptr(
+    pid_t *thread_pids = dthread_shmref2ptr(
         &arg->thread_pids_ref, arg->num_threads * sizeof(*thread_pids));
-    bool *thread_success = dthread_shm_ref2ptr(
+    bool *thread_success = dthread_shmref2ptr(
         &arg->thread_success_ref, arg->num_threads * sizeof(*thread_success));
-    dthread_barrier_t *barrier = dthread_shm_ref2ptr(
+    dthread_barrier_t *barrier = dthread_shmref2ptr(
         &arg->barrier_ref, sizeof(*barrier));
 
     if (array == NULL || thread_pids == NULL || thread_success == NULL ||
@@ -167,7 +167,7 @@ static int pointer_proc(int operation,
             return 0;
         }
         argret->dt_argret_type = DTHREAD_SHMREF;
-        return dthread_shm_ptr2ref(*pointer, 0, &argret->u.dt_shm);
+        return dthread_ptr2shmref(*pointer, 0, &argret->u.dt_shm);
 
     case DTHREAD_PROC_DECODE:
         if (argret->dt_argret_type == DTHREAD_NODATA) {
@@ -180,7 +180,7 @@ static int pointer_proc(int operation,
         if (pointer == NULL)
             return 0;
 
-        *pointer = dthread_shm_ref2ptr(&argret->u.dt_shm, 0);
+        *pointer = dthread_shmref2ptr(&argret->u.dt_shm, 0);
         return *pointer == NULL ? EINVAL : 0;
 
     case DTHREAD_PROC_FREE:
@@ -220,8 +220,8 @@ static int application_main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    if (dthread_alloc_shmarena(0, "break", 0, &arena) != 0 ||
-        dthread_default_shmarena(&arena) != 0) {
+    if (dthread_shm_new_arena(0, "break", 0, &arena) != 0 ||
+        dthread_shm_set_defaultarena(&arena) != 0) {
         puts("FAILURE");
         return EXIT_FAILURE;
     }
@@ -238,15 +238,15 @@ static int application_main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    if (dthread_shm_ptr2ref(array, array_size * sizeof(*array),
+    if (dthread_ptr2shmref(array, array_size * sizeof(*array),
                             &array_ref) != 0 ||
-        dthread_shm_ptr2ref(thread_pids,
+        dthread_ptr2shmref(thread_pids,
                             num_threads * sizeof(*thread_pids),
                             &thread_pids_ref) != 0 ||
-        dthread_shm_ptr2ref(thread_success,
+        dthread_ptr2shmref(thread_success,
                             num_threads * sizeof(*thread_success),
                             &thread_success_ref) != 0 ||
-        dthread_shm_ptr2ref(barrier, sizeof(*barrier), &barrier_ref) != 0) {
+        dthread_ptr2shmref(barrier, sizeof(*barrier), &barrier_ref) != 0) {
         puts("FAILURE");
         return EXIT_FAILURE;
     }
