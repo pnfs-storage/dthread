@@ -112,6 +112,9 @@ if (DTHREAD_TESTING)
     enable_testing()
 endif()
 
+# xthread lib
+option(DTHREAD_XTHREAD "Enable xthread pthread/dthread adaptor lib" ON)
+
 # cmake build type, shared lib option
 if (NOT CMAKE_BUILD_TYPE)
     set (CMAKE_BUILD_TYPE Release
@@ -119,7 +122,7 @@ if (NOT CMAKE_BUILD_TYPE)
     set_property (CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS   # for ccmake
                   "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
 endif ()
-option(BUILD_SHARED_LIBS "Build dthread as a shared lib" ON)
+option(BUILD_SHARED_LIBS "Build with shared libs" ON)
 
 # globally enable -Wall if we are using clang or gcc
 if (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -133,4 +136,7 @@ set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 add_subdirectory(libdthread)
 if (DTHREAD_TESTING)
     add_subdirectory(testin)
+endif()
+if (DTHREAD_XTHREAD)
+    add_subdirectory(xthread)
 endif()
