@@ -60,7 +60,7 @@ function(dthread_test testname)
     if (DTT_TESTSCRIPT)
         if (NOT EXISTS "${DTT_TESTSCRIPT}")
            if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${DTT_TESTSCRIPT}")
-               set(DTT_TESTSCRIPT 
+               set(DTT_TESTSCRIPT
                     "${CMAKE_CURRENT_SOURCE_DIR}/${DTT_TESTSCRIPT}")
            else()
                message(FATAL_ERROR
@@ -91,7 +91,7 @@ function(dthread_test testname)
     else()
         set_tests_properties(${testname} PROPERTIES TIMEOUT 60)
     endif()
-    
+
     if (DTT_TESTSCRIPT)
         set(envs DTHREAD_MLOG_STDERRPRI=DBUG DTHREAD_MLOG_DEFPRI=ERR
                  DTHREAD_MLOG_DIR=/tmp DTHREAD_MLOG_MASK=MGR=DBUG)
@@ -119,6 +119,8 @@ add_executable(t-join t-join.c)
 target_link_libraries(t-join dthread)
 add_executable(t-mal-break t-mal-break.c)
 target_link_libraries(t-mal-break dthread)
+add_executable(t-mal-bsd t-mal-bsd.c)
+target_link_libraries(t-mal-bsd dthread)
 add_executable(t-natargs t-natargs.c)
 target_link_libraries(t-natargs dthread)
 add_executable(t-pthargs t-pthargs.c)
@@ -160,6 +162,7 @@ dthread_test(pthargs NPROC 4 COMMAND ./t-pthargs -s DT_SHM_PATH)
 dthread_test(combo NPROC 4 COMMAND ./t-combo -s DT_SHM_PATH
              TESTSCRIPT t-combo.sc)
 dthread_test(mal-break NPROC 4 COMMAND ./t-mal-break -s DT_SHM_PATH)
+dthread_test(mal-bsd NPROC 4 COMMAND ./t-mal-bsd -s DT_SHM_PATH)
 else()
     message(STATUS "tests disabled, they require DTHREAD_SYNC_PSHARED")
 endif()

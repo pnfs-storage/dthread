@@ -131,7 +131,7 @@ If the dthread library is installed in a non-standard directory,
 add its prefix to the cmake path using the CMAKE_PREFIX_PATH
 variable on the cmake command line, like this:
 ```sh
--DCMAKE_PREFIX_PATH=~/dthread-prefix 
+-DCMAKE_PREFIX_PATH=~/dthread-prefix
 ```
 
 For non-cmake builds, use the appropriate mpicc and set the
@@ -198,7 +198,7 @@ order for dthreads to function properly.   The syncop ID and
 max thread value must also match.
 
 The dthread_run() function sets up the dthread data structures
-and then creates the internal manager and MPI threads.  On rank 0 
+and then creates the internal manager and MPI threads.  On rank 0
 it also starts the initial application thread (running the first
 function in the dispatch array).   The dthread_run() function
 never returns.  Instead, it will exit() the process when it is
@@ -273,7 +273,7 @@ When creating a new thread, the user passes the local address of the
 start function to the create API.  The create code searches the dispatch
 array for the specified function to determine its index in the table.
 The index is passed to the remote node when starting the new thread.
- 
+
 The dthread_argret_t structure is setup to allow small sized
 arguments and returns to be passed inline (through MPI and
 the global thread table in shared memory).   Larger buffers
@@ -287,7 +287,7 @@ can be passed using a shared memory reference (dthread_shmref_t).
 #define DTHREAD_INLINE          2    /* data is inline */
 #define DTHREAD_SHMREF          3    /* data is dthread_shmref_t */
 #define DTHREAD_CANCELED        4    /* no ret, thread was canceled */
- 
+
 typedef struct {
     uint32_t dt_argret_type;               /* type of arg */
     uint32_t dt_inlinelen;                 /* only used if data inline */
@@ -305,7 +305,7 @@ to attached to shared memory.   Each dthread_shmsrc_t in the
 array describes a shared memory segment.  Rank 0 always
 attaches each shared memory segment first to set the segment
 up for the other ranks to attach to.   Shared memory segments
-are identified across ranks by their index in the array of 
+are identified across ranks by their index in the array of
 dthread_shmsrc_t structures (the "shmid").
 
 ```c
@@ -338,12 +338,12 @@ typedef struct {
 ## dthread user-defined memory allocators
 
 Users can provide their own shared memory malloc functions using
-the dthread_shmalloc_ops_t structure.   Each active instance of
+the dthread_shm_alloc_ops_t structure.   Each active instance of
 a shared memory malloc allocator is described by the location
 of its metadata in shared memory (using dthread_shmref_t).  We
 use the term malloc "arena" to refer to the instance's metadata.
 
-The shared memory metadata includes the index of the dthread_shmalloc_ops_t
+The shared memory metadata includes the index of the dthread_shm_alloc_ops_t
 ops used to manage the memory:
 ```c
 typedef struct {
@@ -351,26 +351,27 @@ typedef struct {
     int (*init)(dthread_shmref_t *arena);
     int (*finalize)(dthread_shmref_t *arena);
     void *(*malloc)(dthread_shmref_t *arena, size_t size,
-                    dthread_shmref_t *ref);
+                    dthread_shmref_t *newref);
     void (*free)(dthread_shmref_t *arena, dthread_shmref_t *ref);
-    void *(*realloc)(dthread_shmref_t *arena, dthread_shmref_t ref_in,
-                     size_t new_size, dthread_shmref_t *ref);
-} dthread_shmalloc_ops_t;
+    void *(*realloc)(dthread_shmref_t *arena, dthread_shmref_t inref,
+                     size_t new_size, dthread_shmref_t *newref);
+} dthread_shm_alloc_ops_t;
 ```
 
-All shared memory metadata starts with a common structure that
+All shared memory malloc metadata starts with a common structure that
 is defined as:
 ```c
 typedef struct {
-    uint64_t shm_md_magic;      /* magic number (set when created) */
-    dthread_shmref_t self;      /* describes the entire block */
-    int alloctype;              /* allocation type used for mapping */
-    uint64_t allocated;         /* bytes allocated in block (optional) */
-    dthread_spinlock_t slock;   /* low-level spin lock */
-} dthread_shm_md_t;
+    uint64_t mdmagic;           /* magic number (set when created) */
+    dthread_shmref_t self;      /* our arena (including metadata) */
+    uint64_t min_uoffset;       /* min user data offset in arena */
+    uint64_t max_uoffset;       /* max user data offset in arena */
+    uint64_t badalign_bits;     /* bad bits for proper alignment */
+    int mopid;                  /* malloc-ops id (of malloc driver) */
+    dthread_spinlock_t alock;   /* alloc md spin lock */
+} dthread_shm_alloc_md_t;
 ```
-The allocation type is used to identify the region's
-dthread_shmalloc_ops_t.
+The mopid is used to identify the region's dthread_shm_alloc_ops_t.
 
 ## dthread lifecycle functions
 
@@ -420,8 +421,8 @@ dthread_shmref_t structure.   There are dthread APIs to convert
 between a dthread_shmref_t and a local memory pointer:
 
 ```c
-void *dthread_shm_ref2ptr(dthread_shmref_t *refp, uint64_t len);
-int dthread_shm_ptr2ref(void *ptr, uint64_t len, dthread_shmref_t *refp);
+void *dthread_shmref2ptr(dthread_shmref_t *refp, uint64_t len);
+int dthread_ptr2shmref(void *ptr, uint64_t len, dthread_shmref_t *refp);
 ```
 
 Shared memory allocators can be deployed on a block of shared memory.
@@ -429,14 +430,14 @@ The dthread library currently contains one simple memory allocator
 called "break" that allocates shared memory from a block and only
 frees it when all allocations are released.
 
-To create a shared memory allocator, use dthread_alloc_shmarena()
+To create a shared memory allocator, use dthead_shm_new_arena()
 to create an arena for the named allocator using the shared memory
 segment id number of the block of shared memory.  Note that
 the shmid corresponds to the index of the shared memory in the
 shmsrc array passed to dthread_run():
 ```c
-int dthread_alloc_shmarena(uint64_t shmid, char *shmalloc_name,
-                           size_t size, dthread_shmref_t *newarena);
+int dthead_shm_new_arena(uint64_t shmid, char *shmalloc_name,
+                         size_t size, dthread_shmref_t *newarena);
 ```
 
 The newly established shared memory arena is returned in the
@@ -446,12 +447,12 @@ it too.   This enables the following allocation functions to
 be used:
 ```c
 void *dthread_shm_malloc(dthread_shmref_t *arena, uint64_t len,
-                         dthread_shmref_t *ref);
+                         dthread_shmref_t *newref);
 void dthread_shm_free(dthread_shmref_t *arena, void *ptr);
 void dthread_shm_free_ref(dthread_shmref_t *arena, dthread_shmref_t *ref);
 void *dthread_shm_realloc(dthread_shmref_t *arena, void *ptr, uint64_t len,
                           dthread_shmref_t *newref);
-void *dthread_shm_realloc_ref(dthread_shmref_t *arena, dthread_shmref_t *ref,
+void *dthread_shm_realloc_ref(dthread_shmref_t *arena, dthread_shmref_t *inref,
                               uint64_t len, dthread_shmref_t *newref);
 ```
 
@@ -479,7 +480,7 @@ typedef union {
 } dthread_spinlock_t;
 ```
 
-The high-level ops for a spin lock would be:
+The high-level ops for a spin lock are:
 
 ```c
 int dthread_spin_init(dthread_spinlock_t *lock, int pshared);

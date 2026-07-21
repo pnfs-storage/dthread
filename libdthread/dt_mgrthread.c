@@ -1079,7 +1079,7 @@ static void cancel_thread(struct dtq_mpiqentry *mqe, int *morep) {
                                  cancel->hdr.xidseq);
     canceled->errstatus = errstatus;
 
-    mlog(MGR_INFO, "mgr: CANCELED seq=%d, errstatus=%d", 
+    mlog(MGR_INFO, "mgr: CANCELED seq=%d, errstatus=%d",
          canceled->hdr.xidseq, errstatus);
 
     mqe = dtq_send_enqueue(mqe);

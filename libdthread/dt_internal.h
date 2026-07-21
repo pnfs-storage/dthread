@@ -75,7 +75,19 @@
 typedef struct {
     void *mapping;          /* virtual address we are mapped to in this rank */
     uint64_t size;          /* size of mapping */
-} dthread_shm_t;
+} dthread_shmmap_t;
+
+/*
+ * shared memory segment metadata.
+ */
+#define DTHREAD_SEG_MD_MAGIC UINT64_C(0x64746873676d6431) /* magic number */
+
+typedef struct {
+    uint64_t seg_md_magic;      /* magic number (set when created) */
+    dthread_shmref_t self;      /* describes the entire block */
+    uint64_t allocated;         /* bytes allocated in block (optional) */
+    dthread_spinlock_t slock;   /* low-level spin lock */
+} dthread_shmseg_md_t;
 
 /*
  * thread structures
@@ -196,13 +208,13 @@ typedef struct {
     int ndsps;                   /* size of dispatch table */
 
     dthread_shmsrc_t *shmsrc;    /* array of shared memory sources */
-    dthread_shm_t *shmmap;       /* mappings for the above */
+    dthread_shmmap_t *shmmap;    /* mappings for the above */
     int nshmsrc;                 /* size of shm array */
     pthread_mutex_t arenalock;   /* lock on default arena setting */
     dthread_shmref_t *defarena;  /* default arena (or NULL if not set) */
     dthread_shmref_t da_store;   /* default arena storage */
 
-    dthread_shmalloc_ops_t *mop; /* user-provided mallocs */
+    dthread_shm_alloc_ops_t *mop;/* user-provided mallocs */
     int nusrmops;                /* size of the above array */
 
     int nmaxthread;              /* alloc size of the following tables */
@@ -240,22 +252,26 @@ extern dthread_dtrs_t internal_dthread_rank_state;
 static dthread_dtrs_t *const dtrs = &internal_dthread_rank_state;  /* alias */
 
 /*
- * shared memory
+ * shared memory segment ops
  */
 
 /*
- * establish shared memory mappings.   called by each rank at
- * startup time.   mappings are retained in an internal dthread_shm_t
+ * establish shared memory segment mappings.   called by each rank at
+ * startup time.   mappings are retained in an internal dthread_shmmap_t
  * table.   return 0 on success, error number on error.
  */
-int dthread_shm_establish(dthread_shmsrc_t *shmsrctab, int n);
+int dthread_shmseg_establish(dthread_shmsrc_t *shmsrctab, int n);
 
 /*
  * low-level segment memory allocator.
  */
-int dthread_shm_segavail(uint64_t shmid, dthread_shmref_t *got);
-void *dthread_shm_segalloc(uint64_t shmid, uint64_t want,
+void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
                            dthread_shmref_t *ref);
+
+/*
+ * get a snapshot of how much space is available in a shmseg
+ */
+int dthread_shmseg_avail(uint64_t shmid, dthread_shmref_t *got);
 
 /*
  * syncops

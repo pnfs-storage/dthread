@@ -178,7 +178,7 @@ dthread_argret_t rem_loop(dthread_argret_t *dt_arg) {
     while (1) {
         printf("rem_loop: tick...\n");
         sleep(2);
-    }   
+    }
     printf("rem_loop: done\n");
     return(ret);
 }
@@ -201,7 +201,7 @@ dthread_argret_t rem_loop2(dthread_argret_t *dt_arg) {
                 printf("WARNING: self detach ret err (%s)\n", strerror(rv));
         }
         sleep(2);
-    }   
+    }
     printf("rem_loop2: done\n");
     return(ret);
 }

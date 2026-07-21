@@ -355,7 +355,7 @@ static int proctestcmd(pid_t child, int ignorefail, FILE *sfp, FILE *cfp) {
     }
 
 no_script:
-    /* 
+    /*
      * finished script processing.  drain any remaining
      * command output and return success.
      */
@@ -464,7 +464,7 @@ int main(int argc, char **argv) {
     }
     argc -= optind;
     argv += optind;
-    
+
     if (argc < 1) {
         fprintf(stderr, "missing test-command\n");
         usage(prog);
@@ -474,7 +474,7 @@ int main(int argc, char **argv) {
         err(1, "dt_shmdir: %s", dt_shmdir);
     if ((st.st_mode & S_IFMT) != S_IFDIR)
         errx(1, "dt_shmdir: %s: Not a directory", dt_shmdir);
-    
+
     if (strlen(dt_shmfile) == 0)
         errx(1, "dt_shmfile: empty filename");
 

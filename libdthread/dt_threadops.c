@@ -441,7 +441,7 @@ static void dthread_exit_common(int native, dthread_argret_t *ret, void *v) {
     lt->pth_state = LT_EXITED;
     /* exit sent to <mgr,0> with TERMINATED msg (for gtab[] update) */
     pthread_mutex_unlock(&lt->req.reqlock);
-    
+
     pthread_exit(NULL);   /* triggers cleanup routine, never returns */
     errx(1, "pthread_exit() returned?");
 }
@@ -505,7 +505,7 @@ int dthread_join_common(dthread_t dthread, dthread_argret_t *ret) {
         ret->dt_argret_type = DTHREAD_NODATA;  /* just in case */
     } else {
         /*
-         * the mgr already updated the structure pointed to by treq->u.retval 
+         * the mgr already updated the structure pointed to by treq->u.retval
          * with the retval from the JOINED message, so we don't need to
          * copy anything else out of the req.
          */

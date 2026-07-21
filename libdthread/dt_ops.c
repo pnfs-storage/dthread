@@ -70,3 +70,50 @@ dthread_t dthread_self() {
     rv.dt_seq = lt->seq;
     return(rv);
 }
+
+/*
+ * shmref to local rank pointer
+ */
+void *dthread_shmref2ptr(dthread_shmref_t *refp, uint64_t len) {
+    if (refp == NULL)
+        return(NULL);
+    if (refp->dt_shmid >= dtrs->nshmsrc)
+        return(NULL);     /* bad shmid? */
+    if (refp->dt_offset >= dtrs->shmmap[refp->dt_shmid].size)
+        return(NULL);     /* offset past end of shm? */
+    if (refp->dt_length > dtrs->shmmap[refp->dt_shmid].size - refp->dt_offset)
+        return(NULL);     /* length past end of shm? */
+    if (len && len > refp->dt_length)
+        return(NULL);     /* user wants more data than we have */
+    return((char *) dtrs->shmmap[refp->dt_shmid].mapping + refp->dt_offset);
+}
+
+/*
+ * generate a shmref for an area of local memory, if possible.
+ * return 0 on sucess, error on failure.
+ */
+int dthread_ptr2shmref(void *ptr, uint64_t len, dthread_shmref_t *refp) {
+    int shmid;
+    uint64_t offset;
+
+    /* see if ptr is in a shm region and if so, get the shmid */
+    for (shmid = 0 ; shmid < dtrs->nshmsrc ; shmid++) {
+        if (ptr >= dtrs->shmmap[shmid].mapping) {
+            offset = (char *) ptr - (char *) dtrs->shmmap[shmid].mapping;
+            if (offset < dtrs->shmmap[shmid].size)
+                break;
+        }
+    }
+    if (shmid >= dtrs->nshmsrc)      /* not a pointer to shm */
+        return(EINVAL);
+
+    /* check to make sure ptr+len still fits in the shmid region */
+    if (len > dtrs->shmmap[shmid].size - offset)
+        return(EINVAL);
+
+     /* everything fits!  fill in the shmref. */
+     refp->dt_shmid = shmid;
+     refp->dt_offset = offset;
+     refp->dt_length = len;
+     return(0);
+}
