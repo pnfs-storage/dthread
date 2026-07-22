@@ -40,3 +40,8 @@ target_link_libraries(hello_dthread Threads::Threads)
 
 add_executable(hello_xthread hello_xthread.c)
 target_link_libraries(hello_xthread xthread)
+
+enable_language(CXX)
+add_executable(crono_bfs_xthread crono_bfs_xthread.cc)
+target_compile_features(crono_bfs_xthread PRIVATE cxx_std_11)
+target_link_libraries(crono_bfs_xthread xthread)

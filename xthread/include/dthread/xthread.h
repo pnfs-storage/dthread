@@ -32,7 +32,7 @@ typedef union {
 
 typedef pthread_mutexattr_t xthread_mutexattr_t;
 
-typedef int (*xthread_main_fn_t)(int argc, char **argv);
+typedef int (*xthread_main_fn_t)(void *context, int argc, char **argv);
 typedef void *(*xthread_start_fn_t)(void *);
 
 /* Each function that may be passed to xthread_create() has one entry. */
@@ -81,10 +81,12 @@ bool xthread_is_using_dthreads(void);
 
 /*
  * Runs application_main directly for pthreads.  For dthreads it builds the
- * dispatch table and uses application_main as dispatch entry zero.
+ * dispatch table and invokes application_main through dispatch entry zero on
+ * rank zero.  context must remain valid until xthread_run() finishes.
  */
 int xthread_run(const xthread_config_t *config,
                 xthread_main_fn_t application_main,
+                void *context,
                 int argc,
                 char **argv);
 
