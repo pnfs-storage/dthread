@@ -24,17 +24,20 @@ typedef struct {
     xthread_ref_t barrier_ref;
 } thread_arg_t;
 
-static size_t num_threads;
-static size_t array_size;
+typedef struct {
+    size_t num_threads;
+    size_t array_size;
+} application_options_t;
 
-static size_t application_shared_bytes() {
+static size_t application_shared_bytes(const application_options_t *options)
+{
 
     size_t shared_bytes =
-    num_threads * sizeof(xthread_t) +
-    num_threads * sizeof(thread_arg_t) +
-    array_size * sizeof(pid_t) +
-    num_threads * sizeof(pid_t) +
-    num_threads * sizeof(bool) +
+    options->num_threads * sizeof(xthread_t) +
+    options->num_threads * sizeof(thread_arg_t) +
+    options->array_size * sizeof(pid_t) +
+    options->num_threads * sizeof(pid_t) +
+    options->num_threads * sizeof(bool) +
     sizeof(xthread_barrier_t);
     return shared_bytes;
 }
@@ -53,7 +56,7 @@ static int parse_positive_size(const char *text, size_t *value)
     return 0;
 }
 
-static int parse_args(int argc, char **argv)
+static int parse_args(int argc, char **argv, application_options_t *app_options)
 {
     static const struct option options[] = {
         { "numthreads", required_argument, NULL, 'n' },
@@ -67,12 +70,12 @@ static int parse_args(int argc, char **argv)
     while ((option = getopt_long(argc, argv, "", options, NULL)) != -1) {
         switch (option) {
         case 'n':
-            if (parse_positive_size(optarg, &num_threads) != 0)
+            if (parse_positive_size(optarg, &app_options->num_threads) != 0)
                 return -1;
             have_num_threads = true;
             break;
         case 'a':
-            if (parse_positive_size(optarg, &array_size) != 0)
+            if (parse_positive_size(optarg, &app_options->array_size) != 0)
                 return -1;
             have_array_size = true;
             break;
@@ -82,7 +85,7 @@ static int parse_args(int argc, char **argv)
     }
 
     if (!have_num_threads || !have_array_size || optind != argc ||
-        num_threads > UINT_MAX)
+        app_options->num_threads > UINT_MAX)
         return -1;
 
     return 0;
@@ -147,8 +150,11 @@ static void *thread_hello(void *opaque)
  * In pthread mode xthread_run() calls this directly.  In dthread mode it
  * launches this as the initial application thread on rank 0.
  */
-static int application_main(int argc, char **argv)
+static int application_main(void *opaque, int argc, char **argv)
 {
+    application_options_t *options = opaque;
+    size_t num_threads = options->num_threads;
+    size_t array_size = options->array_size;
     xthread_t *threads;
     thread_arg_t *thread_args;
     pid_t *array;
@@ -244,16 +250,17 @@ int main(int argc, char **argv)
     };
     xthread_shmsrc_t shmsrcs[1];
     xthread_config_t config;
+    application_options_t options = { 0 };
     size_t required_memory_size;
     int rv;
 
     rv = xthread_init(&argc, &argv);
-    if (rv != 0 || parse_args(argc, argv) != 0) {
+    if (rv != 0 || parse_args(argc, argv, &options) != 0) {
         fprintf(stderr, "usage: %s [--dthread] --numthreads N --arraysize N\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    if (array_size % num_threads != 0) {
+    if (options.array_size % options.num_threads != 0) {
         fprintf(stderr, "--arraysize must be a multiple of --numthreads\n");
         return EXIT_FAILURE;
     }
@@ -262,7 +269,7 @@ int main(int argc, char **argv)
      * dthread programs allocate from a shared memory region so we must pre-specify the 
      * total potential amount of required memory 
      */
-    required_memory_size = application_shared_bytes();
+    required_memory_size = application_shared_bytes(&options);
     if (xthread_shmsrc_file(&shmsrcs[0], XTHREAD_SHM_PATH, required_memory_size) != 0) {
         puts("FAILURE");
         return EXIT_FAILURE;
@@ -273,8 +280,8 @@ int main(int argc, char **argv)
         .entry_count = sizeof(entries) / sizeof(entries[0]),
         .shmsrcs = shmsrcs,
         .shmsrc_count = sizeof(shmsrcs) / sizeof(shmsrcs[0]),
-        .max_threads = num_threads + 1,
+        .max_threads = options.num_threads + 1,
     };
 
-    return xthread_run(&config, application_main, argc, argv);
+    return xthread_run(&config, application_main, &options, argc, argv);
 }
