@@ -24,6 +24,13 @@ The dthread system can be built and tested on a single node system
 without a hardware shared memory interconnect using POSIX shared
 memory objects or memory mapped files.
 
+Continue reading below for more information about dthread architecture
+and usage. You can use the instructions below to write new dthread
+applications or to port existing pthread programs to use dthre. 
+Additionally, we offer an [xthread](xthread) wrapper which allows
+threaded programs to easily switch between pthread and dthread which
+can be useful for benchmarking.
+
 ## dthread architecture overview
 
 All dthread applications are launched with MPI.   MPI (and its
