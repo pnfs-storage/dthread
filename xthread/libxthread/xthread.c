@@ -12,6 +12,7 @@ static bool initialized;
 static bool use_dthreads;
 static bool dthread_memory_ready;
 static xthread_main_fn_t saved_application_main;
+static void *saved_application_context;
 
 static void remove_argument(int *argc, char ***argv, int index)
 {
@@ -115,7 +116,7 @@ static int xthread_dthread_application_main(int argc, char **argv)
     }
 
     dthread_memory_ready = true;
-    return saved_application_main(argc, argv);
+    return saved_application_main(saved_application_context, argc, argv);
 }
 
 static int checked_add_u64(uint64_t *total, uint64_t value)
@@ -190,6 +191,7 @@ static int dthread_source_flags(xthread_shmsrc_type_t type,
 
 int xthread_run(const xthread_config_t *config,
                 xthread_main_fn_t application_main,
+                void *context,
                 int argc,
                 char **argv)
 {
@@ -202,7 +204,7 @@ int xthread_run(const xthread_config_t *config,
         return EINVAL;
 
     if (!use_dthreads)
-        return application_main(argc, argv);
+        return application_main(context, argc, argv);
 
     if (config->entries == NULL || config->entry_count == 0 ||
         config->shmsrcs == NULL || config->shmsrc_count == 0 ||
@@ -262,6 +264,7 @@ int xthread_run(const xthread_config_t *config,
     }
 
     saved_application_main = application_main;
+    saved_application_context = context;
     dthread_run(dispatch, dispatch_count,
                 shmsrcs, (int)config->shmsrc_count,
                 NULL, 0, DTHREAD_SYNCOP_ID_PSHARED,

@@ -35,6 +35,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdalign.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -222,6 +223,7 @@ int dthread_shmsegavail(uint64_t shmid, dthread_shmref_t *got) {
 void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
                            dthread_shmref_t *ref) {
     dthread_shmseg_md_t *md;
+    uint64_t pad, total;
     void *rv = NULL;
 
     md = (shmid >= dtrs->nshmsrc) ? NULL : dtrs->shmmap[shmid].mapping;
@@ -229,6 +231,12 @@ void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
         mlog(SHM_ERR, "dthread_shmseg_alloc: bad seg %" PRIu64, shmid);
         return(NULL);
     }
+
+    /* compute padding needed to align 'want' bytes */
+    pad = want % alignof(max_align_t);
+    if (pad)
+        pad = alignof(max_align_t) - pad;    /* convert to padding */
+    total = want + pad;
 
     /* note: segalloc was restricted to rank 0 prior to adding the spinlock */
     if (dthread_spin_lock(&md->slock) != 0) {
@@ -239,9 +247,9 @@ void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
     if (md->allocated >= dtrs->shmmap[shmid].size)
         goto done;
 
-    if (want == 0) {
-        want = dtrs->shmmap[shmid].size - md->allocated;
-    } else if (want > dtrs->shmmap[shmid].size - md->allocated) {
+    if (total == 0) {    /* use remaining space */
+        total = want = dtrs->shmmap[shmid].size - md->allocated;
+    } else if (total > dtrs->shmmap[shmid].size - md->allocated) {
         goto done;
     }
 
@@ -249,13 +257,13 @@ void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
     if (ref) {
         ref->dt_shmid = shmid;
         ref->dt_offset = md->allocated;
-        ref->dt_length = want;
+        ref->dt_length = total;
     }
-    md->allocated += want;
+    md->allocated += total;
 
 done:
     dthread_spin_unlock(&md->slock);
     mlog(SHM_INFO, "dthread_shmseg_alloc: alloc %" PRIu64 " in seg %"
-         PRIu64 " ret=%p", want, shmid, rv);
+         PRIu64 " pad=%" PRIu64 " ret=%p", want, shmid, pad, rv);
     return(rv);
 }
