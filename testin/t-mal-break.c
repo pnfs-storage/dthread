@@ -18,9 +18,11 @@
  * available thread startups and dispatch table.
  */
 int app_main(int argc, char **argv);
+dthread_argret_t rem_alloc(dthread_argret_t *dt_arg);
 
 dthread_dispatch_t disptable[] = {
     { "app_main", { .start0 = app_main }, NULL, NULL },
+    { "rem_alloc", { .start = rem_alloc }, NULL, NULL },
 };
 
 /*
@@ -71,11 +73,13 @@ int main(int argc, char **argv) {
 }
 
 int app_main(int argc, char **argv) {
-    int rv, errcnt;
+    int errcnt, rv;
     dthread_shmref_t ar, ar2;
     void *vp;
     char *p[3], *q[3];
     dthread_shmref_t pr[3];
+    dthread_t thr;
+    dthread_argret_t targ, tret;
 
     errcnt = 0;
     printf("app_main: running\n");
@@ -126,12 +130,65 @@ int app_main(int argc, char **argv) {
         printf("dthread_shm_malloc: default arena ok\n");
     }
 
+    printf("launching-thread\n");
+    targ.dt_argret_type = DTHREAD_NODATA;
+    rv = dthread_ncreate(&thr, NULL, rem_alloc, &targ);
+    if (rv) {
+        printf("dthread_ncreate: failed %d\n", rv);
+        errcnt++;
+        goto done;
+    }
+    printf("joining-thread\n");
+    rv = dthread_njoin(thr, &tret);
+    if (rv) {
+        printf("dthread_ncreate: failed %d\n", rv);
+        errcnt++;
+        goto done;
+    }
+    printf("finished-thread\n");
+    if (tret.dt_argret_type != DTHREAD_INLINE) {
+        printf("bad thread ret type %d!!\n", tret.dt_argret_type);
+        errcnt++;
+    } else if (tret.u.dt_inline[0] != 0) {
+        printf("bad thread return before default set\n");
+        errcnt++;
+    } else {
+        printf("thread return OK (before default set)\n");
+    }
+
+
     rv = dthread_shm_set_defaultarena(&ar);
     if (rv == 0) {
         printf("dthread_shm_set_defaultarena: default arena set\n");
     } else {
         printf("dthread_shm_set_defaultarena: default arena failed %d\n", rv);
         errcnt++;
+    }
+
+    printf("launching-thread2\n");
+    targ.dt_argret_type = DTHREAD_NODATA;
+    rv = dthread_ncreate(&thr, NULL, rem_alloc, &targ);
+    if (rv) {
+        printf("dthread_ncreate: failed2 %d\n", rv);
+        errcnt++;
+        goto done;
+    }
+    printf("joining-thread2\n");
+    rv = dthread_njoin(thr, &tret);
+    if (rv) {
+        printf("dthread_ncreate: failed2 %d\n", rv);
+        errcnt++;
+        goto done;
+    }
+    printf("finished-thread2\n");
+    if (tret.dt_argret_type != DTHREAD_INLINE) {
+        printf("bad thread2 ret type %d!!\n", tret.dt_argret_type);
+        errcnt++;
+    } else if (tret.u.dt_inline[0] == 0) {
+        printf("bad thread2 return after default set\n");
+        errcnt++;
+    } else {
+        printf("thread2 return OK (after default set)\n");
     }
 
     p[0] = dthread_shm_malloc(NULL, 1, &pr[0]);
@@ -213,4 +270,23 @@ int app_main(int argc, char **argv) {
 done:
     printf("app_main: return %d\n", errcnt);
     return((errcnt) ? 1 : 0);
+}
+
+dthread_argret_t rem_alloc(dthread_argret_t *dt_arg) {
+    dthread_argret_t ret;
+    void *ptr;
+    dthread_shmref_t ref;
+
+    printf("rem_alloc: running\n");
+
+    ptr = dthread_shm_malloc(NULL, 128, &ref);
+    if (ptr) {
+        dthread_shm_free_ref(NULL, &ref);
+    }
+    printf("rem_alloc: alloc_ran: %d\n", ptr != NULL);
+    ret.dt_argret_type = DTHREAD_INLINE;
+    ret.u.dt_inline[0] = (ptr != NULL);
+
+    printf("rem_alloc: returning\n");
+    return(ret);
 }

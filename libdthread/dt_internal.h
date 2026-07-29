@@ -211,8 +211,9 @@ typedef struct {
     dthread_shmmap_t *shmmap;    /* mappings for the above */
     int nshmsrc;                 /* size of shm array */
     pthread_mutex_t arenalock;   /* lock on default arena setting */
-    dthread_shmref_t *defarena;  /* default arena (or NULL if not set) */
-    dthread_shmref_t da_store;   /* default arena storage */
+    dthread_shmref_t *defarena;  /* default arena (&da_store, NULL if !set) */
+    dthread_shmref_t da_store;   /* default arena storage (local copy) */
+    dthread_shmref_t *da_src;    /* default arena info (in shm) */
 
     dthread_shm_alloc_ops_t *mop;/* user-provided mallocs */
     int nusrmops;                /* size of the above array */

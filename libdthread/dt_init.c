@@ -49,6 +49,7 @@
  * is fully up.
  */
 typedef struct {
+    dthread_shmref_t boot_defarena;   /* default arena */
     dthread_shmref_t boot_gtab;       /* global thread table */
 } dthread_shm_bootstrap_t;
 
@@ -97,13 +98,18 @@ static size_t strgen(char **newstr, ...) {
 #endif
 
 /*
- * shared memory bootstrap.  currently we just setup the global
- * thread table.   we do all allocations through segment 0.
+ * shared memory bootstrap.  currently we setup the default
+ * arena shmref and the global thread table.  all bootstrap
+ * allocations are done using shm segment 0.
  */
 static int dthread_shm_bootstrap(dthread_shm_bootstrap_t *sboot,
                                  int maxthreads) {
     void *ptr;
     uint64_t gtsize;
+
+    ptr = dthread_shmseg_alloc(0, sizeof(dthread_shmref_t),
+                               &sboot->boot_defarena);
+    memset(ptr, 0, sizeof(dthread_shmref_t));
 
     gtsize = maxthreads * sizeof(dtrs->gtab[0]);
     ptr = dthread_shmseg_alloc(0, gtsize, &sboot->boot_gtab);
@@ -292,6 +298,13 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
     } else {
         dtrs->mop = NULL;
         dtrs->nusrmops = 0;
+    }
+
+    /* get local ptr to default arena info in shared memory */
+    dtrs->da_src = dthread_shmref2ptr(&shmboot.boot_defarena, 0);
+    if (dtrs->da_src == NULL) {
+        fprintf(stderr, "dthread_run: %d: defarena src err\n", dtrs->mpi_rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
     /* setup the thread tables */

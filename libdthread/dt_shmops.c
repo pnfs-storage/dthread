@@ -862,17 +862,29 @@ static dthread_shm_alloc_ops_t *mopid2ops(int mopid) {
 }
 
 /*
- * set default arena for shm_malloc.  can only be set once.
- * prob a good idea to have all ranks set the same default.
- * XXX: consider moving setting from dtrs to shared memory?
+ * set default arena for shm_malloc.  can only be set once
+ * and only by a thread running on rank 0.  the intent is
+ * for the initial application thread to setup the default
+ * before calling dthread_create.   child dthreads will
+ * pick up the default via shared memory.
  */
 int dthread_shm_set_defaultarena(dthread_shmref_t *dflt) {
     int rv;
+
+    if (dtrs->mpi_rank) {
+        mlog(SHM_ERR, "dthread_shm_set_defaultarena: non-zero rank %d",
+             dtrs->mpi_rank);
+        return(EPERM);     /* not allowed */
+    }
+
     pthread_mutex_lock(&dtrs->arenalock);
     if (dtrs->defarena == NULL) {
-        dtrs->da_store = *dflt;
+        dtrs->da_store = *dflt;  /* save to local copy */
         dtrs->defarena = &dtrs->da_store;
         rv = 0;
+
+        /* write arena to shm so other ranks can see it */
+        *dtrs->da_src = *dflt;   /* the only place we write to da_src */
     } else {
         rv = EEXIST;
     }
@@ -881,6 +893,29 @@ int dthread_shm_set_defaultarena(dthread_shmref_t *dflt) {
          ">", dflt, dtrs->defarena, dflt->dt_shmid, dflt->dt_offset,
          dflt->dt_length);
     return(rv);
+}
+
+/*
+ * get default arena for shm_malloc.
+ */
+static dthread_shmref_t *dthread_shm_get_defaultarena() {
+
+    if (dtrs->defarena)
+        return(dtrs->defarena);            /* already found default arena */
+    if (dtrs->da_src->dt_length == 0)
+        return(NULL);                      /* default arena not set */
+
+    /* check da_src to see if defarena has been set */
+    pthread_mutex_lock(&dtrs->arenalock);
+    if (dtrs->defarena == NULL && dtrs->da_src->dt_length) {
+        dtrs->da_store = *dtrs->da_src;    /* make local copy */
+        dtrs->defarena = &dtrs->da_store;  /* setup default for return */
+    } else {
+        /* we'll return dtrs->defarena which is still set to NULL */
+    }
+    pthread_mutex_unlock(&dtrs->arenalock);
+
+    return(dtrs->defarena);
 }
 
 /*
@@ -962,7 +997,7 @@ static dthread_shm_alloc_ops_t *dthread_shm_validate_args(char *tag,
     /* get arena, falling back to default if none give */
     arena = *arenap;
     if (arena == NULL) {     /* try to sub in default */
-        arena = dtrs->defarena;
+        arena = dthread_shm_get_defaultarena();
         if (arena == NULL) {
             mlog(SHM_ERR, "shm_validate: %s: no default arena", tag);
             return(NULL);
