@@ -1,7 +1,5 @@
 app_main: xref=
 app_main: checking bad detach request
-DETACH
-DETACHED
 app_main: OK - bad detach returned correct error
 app_main: testing self detach child thread
 CREATE

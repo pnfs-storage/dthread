@@ -252,7 +252,7 @@ int dthread_detach(dthread_t thread) {
     struct dtmsg_detach *det;
 
     /* prevalidate thread */
-    if (thread.dt_index >= dtrs->nmaxthread)
+    if (dthread_dt2gtab(&thread) == NULL)
         return(ESRCH);
 
     /* block cancel while we use thread's req and a mqe */
@@ -314,11 +314,9 @@ int dthread_cancel(dthread_t thread) {
     struct dtmsg_cancel *can;
 
     /* prevalidate thread */
-    if (thread.dt_index >= dtrs->nmaxthread ||
-        dtrs->gtab[thread.dt_index].allocated == 0 ||
-        dtrs->gtab[thread.dt_index].seq != thread.dt_seq)
+    if (dthread_dt2gtab(&thread) == NULL)
         return(ESRCH);
-     peer = dtrs->gtab[thread.dt_index].rank;
+     peer = dtrs->gtab[thread.dt_index].rank;  /* could go stale */
 
     /* block cancel while we use thread's req and a mqe */
     rv = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldcanstate);
@@ -378,7 +376,7 @@ static void dthread_exit_common(int native, dthread_argret_t *ret, void *v) {
     /* permanently block cancel for rest of thread life (shouldn't fail) */
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
-    /* recover our ltab[] entry using TLS and use it to get gtab[] */
+    /* recover our ltab[] entry using TLS and use it to get our gtab[] */
     lt = pthread_getspecific(dtrs->ltabkey);
     if (!lt) {
         warnx("dt_threadsops: FATAL!  exit unable to get ltabkey for thread");
@@ -527,10 +525,8 @@ int dthread_njoin(dthread_t thread, dthread_argret_t *ret) {
     uint32_t didx;
     int rv, oldcanstate;
 
-    /* validate thread */
-    if (thread.dt_index >= dtrs->nmaxthread ||
-        dtrs->gtab[thread.dt_index].allocated == 0 ||
-        thread.dt_seq != dtrs->gtab[thread.dt_index].seq)
+    /* prevalidate thread */
+    if (dthread_dt2gtab(&thread) == NULL)
         return(ESRCH);
 
     if ( (lt = pthread_getspecific(dtrs->ltabkey)) &&
@@ -569,10 +565,8 @@ int dthread_join(dthread_t thread, void **retptr) {
     int rv, oldcanstate;
     dthread_argret_t procret;
 
-    /* validate thread */
-    if (thread.dt_index >= dtrs->nmaxthread ||
-        dtrs->gtab[thread.dt_index].allocated == 0 ||
-        thread.dt_seq != dtrs->gtab[thread.dt_index].seq)
+    /* prevalidate thread */
+    if (dthread_dt2gtab(&thread) == NULL)
         return(ESRCH);
 
     if ( (lt = pthread_getspecific(dtrs->ltabkey)) &&

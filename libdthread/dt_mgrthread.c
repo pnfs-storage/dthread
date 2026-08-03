@@ -147,23 +147,6 @@ static void *recycle_dtmsg_mqe(struct dtq_mpiqentry *mqe, void **from,
         recycle_dtmsg_mqe(MQE, (void **)&(FROM), sizeof(*(TO)), OP, XID)
 
 /*
- * convert a valid dthread_t give by the app into its gtab pointer.
- * if it is not valid, return NULL.
- */
-static dthread_gtab_t *validate_thread(dthread_t *thread) {
-    dthread_gtab_t *gt;
-
-    if (thread->dt_index < 0 || thread->dt_index >= dtrs->nmaxthread)
-        return(NULL);
-
-    gt = &dtrs->gtab[thread->dt_index];
-    if (gt->allocated == 0 || thread->dt_seq != gt->seq)
-        return(NULL);
-
-    return(gt);
-}
-
-/*
  * find a pending request on mgr's rpending list.  we use the seq and op
  * as the search key.
  */
@@ -990,7 +973,7 @@ static void detach_thread(struct dtq_mpiqentry *mqe, int *morep) {
     dthread_gtab_t *gt;
     dthread_request_t *rqe;
 
-    gt = validate_thread(&detach->thread);
+    gt = dthread_dt2gtab(&detach->thread);
     rqe = NULL;
     if (gt) {
         if (gt->detached) {
@@ -1055,7 +1038,7 @@ static void cancel_thread(struct dtq_mpiqentry *mqe, int *morep) {
          cancel->thread.dt_index, cancel->thread.dt_seq,
          cancel->hdr.xidseq);
 
-    gt = validate_thread(&cancel->thread);
+    gt = dthread_dt2gtab(&cancel->thread);
     if (gt == NULL) {
         errstatus = ESRCH;
     } else if (gt->rank != dtrs->mpi_rank) {
@@ -1107,7 +1090,7 @@ static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
          join->thread.dt_index, join->thread.dt_seq,
          join->hdr.xidseq);
 
-    gt = validate_thread(&join->thread);
+    gt = dthread_dt2gtab(&join->thread);
 
     /* case 1: invalid thread or detached thread => JOINED error */
     if (gt == NULL || gt->detached) {

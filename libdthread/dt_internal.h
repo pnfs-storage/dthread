@@ -253,6 +253,17 @@ extern dthread_dtrs_t internal_dthread_rank_state;
 static dthread_dtrs_t *const dtrs = &internal_dthread_rank_state;  /* alias */
 
 /*
+ * thread ops
+ */
+
+/*
+ * find and return the gtab entry for the given dthread_t.
+ * returns the dthread_gtab_t or NULL if thread is not valid.
+ * caller must ensure the gtab remains valid before using it.
+ */
+dthread_gtab_t *dthread_dt2gtab(dthread_t *thread);
+
+/*
  * shared memory segment ops
  */
 

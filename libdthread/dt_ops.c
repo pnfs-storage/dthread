@@ -43,6 +43,36 @@
 #include "dt_internal.h"
 
 /*
+ * find and return the gtab entry for the given dthread_t.
+ * returns the dthread_gtab_t or NULL if thread is not valid.
+ *
+ * note that we do not guarantee that the returned gtab remains
+ * valid after we return it: the caller must handle this.
+ * for example, it is safe for the <mgr,0> thread to use the
+ * returned gtab entry because it is the only thread that can
+ * free gtab entries.   it may also be safe for the calling
+ * thread to use the returned gtab entry if the caller is
+ * holding some sort of lock that prevents the thread from
+ * exiting (e.g. a locked thread list).   this function can
+ * also be used to pre-validate a dthread_t before attempting
+ * an operation on it: if we return NULL the thread is not
+ * valid, if we return !NULL the thread was valid at the
+ * time of our call and may or may not still be valid.
+ */
+dthread_gtab_t *dthread_dt2gtab(dthread_t *thread) {
+    dthread_gtab_t *gt;
+
+    if (thread->dt_index < 0 || thread->dt_index >= dtrs->nmaxthread)
+        return(NULL);     /* index out of range */
+
+    gt = &dtrs->gtab[thread->dt_index];
+    if (gt->allocated == 0 || thread->dt_seq != gt->seq)
+        return(NULL);     /* inactive or seq mismatch */
+
+    return(gt);
+}
+
+/*
  * return current thread's handle
  */
 dthread_t dthread_self() {
