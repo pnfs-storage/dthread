@@ -42,6 +42,11 @@
 #include "dt_internal.h"
 
 /*
+ * local function prototypes
+ */
+static int dtq_recv_enqueue_locked(struct dtq_mpiqentry *mqe);
+
+/*
  * block on mgr_notify waiting for a notification if no pending work todo.
  */
 void dthread_notifywait() {
@@ -105,7 +110,9 @@ dthread_request_t *dtq_req_alloc() {
  */
 void dtq_req_enqueue(dthread_request_t *req) {
     int was_empty, ql;
-    DT_UNUSED(ql);     /* only used when mlog is enabled */
+
+    /* only used when mlog is enabled, quiet warnings when !mlog */
+    DT_UNUSED(ql);
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
     was_empty = (TAILQ_FIRST(&dtrs->dtq.mpirecvq) == NULL &&
@@ -210,18 +217,27 @@ void dtq_mqe_unalloc(struct dtq_mpiqentry *mqe) {
  */
 struct dtq_mpiqentry *dtq_send_enqueue(struct dtq_mpiqentry *mqe) {
     struct dtq_mpiqentry *rv = NULL;
+    int was_empty;
+
+    /* only used when mlog is enabled, quiet warnings when !mlog */
+    DT_UNUSED(was_empty);
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
     if (dtrs->dtq.mpisq_draindown) {
         rv = mqe;
         mlog(QUE_ERR, "send_enqueue to %d failed: draining", mqe->peer);
+    } else if (mqe->peer == dtrs->mpi_rank) {  /* loop if send to self */
+        was_empty = dtq_recv_enqueue_locked(mqe);
+        dtrs->dtq.nloop++;
+        mlog(QUE_DBG, "send_enqueue loop mqe=%p, notify=%d, len=%d, rqlen=%d",
+             mqe, was_empty, mqe->flen, dtrs->dtq.mpirqlen);
     } else {
         /* no need to notify mpi thread since it polls mpisendq */
         TAILQ_INSERT_TAIL(&dtrs->dtq.mpisendq, mqe, mql);
         dtrs->dtq.mpisqlen++;
         if (dtrs->dtq.mpisqlen > dtrs->dtq.mpimaxsqlen)
             dtrs->dtq.mpimaxsqlen = dtrs->dtq.mpisqlen;
-        mlog(QUE_DBG, "send_enqueue mqe=%p, peer=%d, len=%d, qlen=%d",
+        mlog(QUE_DBG, "send_enqueue mqe=%p, peer=%d, len=%d, sqlen=%d",
              mqe, mqe->peer, mqe->flen, dtrs->dtq.mpisqlen);
     }
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
@@ -272,24 +288,39 @@ void dtq_send_release(struct dtq_mpiqentry *mqe) {
 }
 
 /*
- * enqueue a mqe for the manager thread to receive and process.
+ * enqueue a mqe for the manager thread to receive and process (w/qlock).
+ * returns was_empty.
  */
-void dtq_recv_enqueue(struct dtq_mpiqentry *mqe) {
-    int was_empty, ql;
-    DT_UNUSED(ql);     /* only used when mlog is enabled */
+static int dtq_recv_enqueue_locked(struct dtq_mpiqentry *mqe) {
+    int was_empty;
 
-    pthread_mutex_lock(&dtrs->dtq.dtqlock);
     was_empty = (TAILQ_FIRST(&dtrs->dtq.mpirecvq) == NULL &&
                  TAILQ_FIRST(&dtrs->dtq.mgrreqq) == NULL);
     TAILQ_INSERT_TAIL(&dtrs->dtq.mpirecvq, mqe, mql);
     dtrs->dtq.mpirqlen++;
-    ql = dtrs->dtq.mpirqlen;
     if (dtrs->dtq.mpirqlen > dtrs->dtq.mpimaxrqlen)
         dtrs->dtq.mpimaxrqlen = dtrs->dtq.mpirqlen;
 
     if (was_empty) {
         pthread_cond_signal(&dtrs->dtq.mgr_notify);
     }
+
+    return(was_empty);
+}
+
+/*
+ * enqueue a mqe for the manager thread to receive and process.
+ */
+void dtq_recv_enqueue(struct dtq_mpiqentry *mqe) {
+    int was_empty, ql;
+
+    /* only used when mlog is enabled, quiet warnings when !mlog */
+    DT_UNUSED(was_empty);
+    DT_UNUSED(ql);
+
+    pthread_mutex_lock(&dtrs->dtq.dtqlock);
+    was_empty = dtq_recv_enqueue_locked(mqe);
+    ql = dtrs->dtq.mpirqlen;
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
 
     mlog(QUE_DBG, "recv_enqueue mqe=%p, notify=%d, qlen=%d", mqe,
@@ -366,8 +397,9 @@ int dtq_send_drainstate() {
  * dtq_stats.  load stats into provided dtq_stats structure.
  */
 void dtq_stats(struct dtq_stats *qs) {
-    qs->nmqe = dtrs->dtq.nmqe;
     qs->nreq = dtrs->dtq.nreq;
+    qs->nloop = dtrs->dtq.nloop;
+    qs->nmqe = dtrs->dtq.nmqe;
     qs->mpimaxsqlen = dtrs->dtq.mpimaxsqlen;
     qs->mpimaxrqlen = dtrs->dtq.mpimaxrqlen;
     qs->mgrmaxrqlen = dtrs->dtq.mgrmaxrqlen;
@@ -435,6 +467,6 @@ void dtq_finalize() {
         free(mqe);
     }
 
-    mlog(QUE_INFO, "dtq_finalize complete with nreq=%d nmqe=%d",
-         dtrs->dtq.nreq, dtrs->dtq.nmqe);
+    mlog(QUE_INFO, "dtq_finalize complete with nreq=%d nloop=%d nmqe=%d",
+         dtrs->dtq.nreq, dtrs->dtq.nloop, dtrs->dtq.nmqe);
 }

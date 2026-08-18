@@ -64,8 +64,9 @@
  * stats we collect about queuing
  */
 struct dtq_stats {
-    int nmqe;                               /* # mpi queue entries alloc'd */
     int nreq;                               /* # int req structs alloc'd */
+    int nloop;                              /* # of loopback msgs */
+    int nmqe;                               /* # mpi queue entries alloc'd */
     int mpimaxsqlen;                        /* max size sendq has grown to */
     int mpimaxrqlen;                        /* max size recvq has grown to */
     int mgrmaxrqlen;                        /* max size reqq has grown to */
@@ -111,6 +112,7 @@ struct dtq_state {
     struct mqelist mpirecvq;      /* MPI recv queue */
     int mpirqlen;                 /* #mqes on recvq */
     int mpimaxrqlen;              /* max size recvq has grown to */
+    int nloop;                    /* # of loopback msgs */
 
     int nmqe;                     /* number of mqes allocated */
     struct mqelist mqefree;       /* list of free mpiq_entry structs */
