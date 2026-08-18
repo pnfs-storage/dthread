@@ -117,24 +117,24 @@ struct dtq_state {
 };
 
 /* api function prototypes */
-void dthread_notifywait(int *morep);
+void dthread_notifywait(void);
 void dtq_notifytimelimit(int newval);
 
 dthread_request_t *dtq_req_alloc(void);
 
 void dtq_req_enqueue(dthread_request_t *req);
-dthread_request_t *dtq_req_dequeue(int *morep);
+dthread_request_t *dtq_req_dequeue(void);
 void dtq_req_release(dthread_request_t *req);
 
 struct dtq_mpiqentry *dtq_mqe_alloc(void);
 void dtq_mqe_unalloc(struct dtq_mpiqentry *mqe);
 
 struct dtq_mpiqentry *dtq_send_enqueue(struct dtq_mpiqentry *mqe);
-struct dtq_mpiqentry *dtq_send_dequeue();
+struct dtq_mpiqentry *dtq_send_dequeue(void);
 void dtq_send_release(struct dtq_mpiqentry *mqe);
 
 void dtq_recv_enqueue(struct dtq_mpiqentry *mqe);
-struct dtq_mpiqentry *dtq_recv_dequeue(int *morep);
+struct dtq_mpiqentry *dtq_recv_dequeue(void);
 void dtq_recv_release(struct dtq_mpiqentry *mqe);
 
 int dtq_send_draindown(void);

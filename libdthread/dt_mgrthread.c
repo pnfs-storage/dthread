@@ -115,8 +115,8 @@ struct dt_wrapstate {
  */
 static void dthreadcleanup(void *arg);
 static void *dthreadwrap(void *arg);
-static void process_mqe(struct dtq_mpiqentry *mqe, int *morep);
-static void process_req(dthread_request_t *rqe, int *morep);
+static void process_mqe(struct dtq_mpiqentry *mqe);
+static void process_req(dthread_request_t *rqe);
 
 /*
  * recycle a received dtmsg mqe for reuse (e.g. to send a reply back).
@@ -253,7 +253,7 @@ static struct dthread_request *joinwait_search(dthread_t *thread, int rm) {
  * send a JOINED to end a JOINWAIT and release the JOINWAIT.
  * all JOINWANTs are handled by <mgr,0>, so only <mgr,0> sends JOINED.
  */
-static void joinwait_end_release(struct dthread_request *rqe, int *morep) {
+static void joinwait_end_release(struct dthread_request *rqe) {
     struct dtq_mpiqentry *mqe;
     struct dtmsg_joined *joined;
 
@@ -282,10 +282,7 @@ static void joinwait_end_release(struct dthread_request *rqe, int *morep) {
                  mqe, mqe->peer, joined->hdr.xidseq,
                  joined->joinret.dt_argret_type);
             mqe = dtq_send_enqueue(mqe);
-            if (mqe == NULL) {     /* sent to queue? */
-                if (morep)
-                    *morep = 1;
-            } else {
+            if (mqe != NULL) {     /* not sent to queue? */
                 /* failed to queue, draindown/shutdown in progress */
                 mlog(MGR_CRIT, "joinwait_end_release: enqueue JOINED failed");
                 dtq_mqe_unalloc(mqe);
@@ -580,7 +577,7 @@ static void retclean_request(dthread_ltab_t *lt, int finalstate) {
  * <mgr,0> create thread dtmsg handler, called from process_mqe().
  * caller should free mqe (we do not recyle).
  */
-static void create_thread(struct dtq_mpiqentry *mqe, int *morep) {
+static void create_thread(struct dtq_mpiqentry *mqe) {
     struct dtmsg_create *cre = (struct dtmsg_create *) mqe->frame;
     int errstatus, detachit, target;
     void *stk_addr;
@@ -664,7 +661,6 @@ static void create_thread(struct dtq_mpiqentry *mqe, int *morep) {
     if (startmqe == NULL) {
         /* success!  req now pending waiting for STARTED reply */
         mgrstate.threads_starting++;
-        *morep = 1;
         TAILQ_INSERT_TAIL(&mgrstate.rpending, startreq, rl);
         return;               /* done! */
     }
@@ -702,7 +698,6 @@ send_created_error: {
             } else {
                 mlog(MGR_INFO, "mgr: CREATE: sent CREATED to %d seq=%d,e=%d",
                      mqe->peer, cre->hdr.xidseq, errstatus);
-                *morep = 1;
             }
         }
     }
@@ -714,7 +709,7 @@ send_created_error: {
  * when <mgr,0> sends us a start dtmsg to start an app thread.
  * caller should free mqe (we do not recyle).
  */
-static void start_thread(struct dtq_mpiqentry *mqe, int *morep) {
+static void start_thread(struct dtq_mpiqentry *mqe) {
     struct dtmsg_start *start = (struct dtmsg_start *) mqe->frame;
     struct dtq_mpiqentry *startedmqe;
     struct dtmsg_started *started;
@@ -774,8 +769,6 @@ done:
         /* thread will be stuck in starting state */
         mlog(MGR_CRIT, "mgr:start_thread: err send enqueue failed!");
         dtq_mqe_unalloc(startedmqe);
-    } else {
-        *morep = 1;
     }
     return;
 }
@@ -967,7 +960,7 @@ static void dthreadcleanup(void *arg) {
  * <mgr,0> detach thread dtmsg handler, called from process_mqe().
  * we recycle the mqe, so the caller should NOT release it.
  */
-static void detach_thread(struct dtq_mpiqentry *mqe, int *morep) {
+static void detach_thread(struct dtq_mpiqentry *mqe) {
     struct dtmsg_detach *detach = (struct dtmsg_detach *) mqe->frame;
     struct dtmsg_detached *detached;
     dthread_gtab_t *gt;
@@ -1004,8 +997,6 @@ static void detach_thread(struct dtq_mpiqentry *mqe, int *morep) {
     if (mqe) {
         mlog(MGR_CRIT, "mgr: detach_thread: send enqueue err failed, dropping");
         dtq_mqe_unalloc(mqe);
-    } else {
-        *morep = 1;
     }
 
     /*
@@ -1017,7 +1008,7 @@ static void detach_thread(struct dtq_mpiqentry *mqe, int *morep) {
         mlog(MGR_INFO, "mgr: DETACH: <%zd,%d> had a joinwait to cancel",
              gt - dtrs->gtab, gt->seq);
         rqe->reqerror = EINVAL;
-        joinwait_end_release(rqe, morep);
+        joinwait_end_release(rqe);
     }
 
     return;
@@ -1027,7 +1018,7 @@ static void detach_thread(struct dtq_mpiqentry *mqe, int *morep) {
  * <mgr,T> cancel thread dtmsg handler, called from process_mqe().
  * we recycle the mqe, so the caller should NOT release it.
  */
-static void cancel_thread(struct dtq_mpiqentry *mqe, int *morep) {
+static void cancel_thread(struct dtq_mpiqentry *mqe) {
     struct dtmsg_cancel *cancel = (struct dtmsg_cancel *) mqe->frame;
     struct dtmsg_canceled *canceled;
     dthread_gtab_t *gt;
@@ -1069,8 +1060,6 @@ static void cancel_thread(struct dtq_mpiqentry *mqe, int *morep) {
     if (mqe) {
         mlog(MGR_CRIT, "mgr: cancel_thread: send enqueue err failed, drop");
         dtq_mqe_unalloc(mqe);
-    } else {
-        *morep = 1;
     }
 
     return;
@@ -1080,7 +1069,7 @@ static void cancel_thread(struct dtq_mpiqentry *mqe, int *morep) {
  * <mgr,0> join thread dtmsg handler, called from process_mqe().
  * we recycle the mqe, so the caller should NOT release it.
  */
-static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
+static void join_thread(struct dtq_mpiqentry *mqe) {
     struct dtmsg_join *join = (struct dtmsg_join *) mqe->frame;
     struct dtmsg_joined *joined;
     dthread_gtab_t *gt;
@@ -1106,8 +1095,6 @@ static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
         if (mqe) {
             mlog(MGR_CRIT, "mgr: join_thread: send enqueue err failed, drop");
             dtq_mqe_unalloc(mqe);
-        } else {
-            *morep = 1;
         }
         return;
     }
@@ -1124,8 +1111,6 @@ static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
         if (mqe) {
             mlog(MGR_CRIT, "mgr: join_thread: send enqueue joined failed");
             dtq_mqe_unalloc(mqe);
-        } else {
-            *morep = 1;
         }
         gtab_free( gt - &dtrs->gtab[0] );
         return;
@@ -1169,8 +1154,6 @@ static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
     if (mqe) {
         mlog(MGR_CRIT, "mgr: join_thread: send enqueue 3e joined err failed");
         dtq_mqe_unalloc(mqe);
-    } else {
-        *morep = 1;
     }
 
     return;
@@ -1179,7 +1162,7 @@ static void join_thread(struct dtq_mpiqentry *mqe, int *morep) {
 /*
  * <mgr,0> thread termination dtmsg handler.  called from process_mqe().
  */
-static void terminated_thread(dthread_t *thr, uint32_t finstate, int *morep) {
+static void terminated_thread(dthread_t *thr, uint32_t finstate) {
     dthread_gtab_t *gt = &dtrs->gtab[thr->dt_index];
     struct dthread_request *rqe;
 
@@ -1201,7 +1184,7 @@ static void terminated_thread(dthread_t *thr, uint32_t finstate, int *morep) {
         }
         mlog(MGR_INFO, "terminated_thread <%d,%d> has a joinwait to release",
              thr->dt_index, thr->dt_seq);
-        joinwait_end_release(rqe, morep);
+        joinwait_end_release(rqe);
     }
 
     if (gt->detached) {
@@ -1375,7 +1358,7 @@ static int mgr_startapp(int argc, char **argv) {
  * manager main routine
  */
 int mgr_main(int argc, char **argv) {
-    int rv, morework;
+    int rv;
     struct dtq_mpiqentry *mqe;
     dthread_request_t *req;
 
@@ -1399,7 +1382,6 @@ int mgr_main(int argc, char **argv) {
      * main loop
      */
     mlog(MGR_INFO, "mgr_main entering main loop");
-    morework = 0;
     while (1) {
 
         /*
@@ -1423,24 +1405,21 @@ int mgr_main(int argc, char **argv) {
             break;       /* all sends complete, we can stop mpithread */
         }
 
-        /* wait for work unless we already know some is queued */
-        if (morework == 0) {
-            dthread_notifywait(&morework);        /* block here! */
-        }
+        dthread_notifywait();    /* blocks here if no work to do! */
 
         /* check for inbound messages from MPI */
-        if (morework && (mqe = dtq_recv_dequeue(&morework)) != NULL) {
+        if ((mqe = dtq_recv_dequeue()) != NULL) {
 
             /* handle inbound mqe messages */
-            process_mqe(mqe, &morework);
+            process_mqe(mqe);
 
         }
 
         /* check for inbound reqs */
-        if (morework && (req = dtq_req_dequeue(&morework)) != NULL) {
+        if ((req = dtq_req_dequeue()) != NULL) {
 
             /* handle inbound requests */
-            process_req(req, &morework);
+            process_req(req);
 
         }
     }
@@ -1486,7 +1465,7 @@ int mgr_main(int argc, char **argv) {
  * the mgr needs to release or recycle the incoming mqe (we
  * note in a comment when we use an API that does recycling).
  */
-static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
+static void process_mqe(struct dtq_mpiqentry *mqe) {
     struct dtmsg_header *hdr;
     struct dtmsg_created *created;
     struct dtmsg_started *started;
@@ -1528,7 +1507,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          * application thread.
          */
         if (mqe->flen >= sizeof(struct dtmsg_create)) {
-            create_thread(mqe, morep);
+            create_thread(mqe);
         } else {
             mlog(MGR_INFO, "process_mqe: runt create request dropped");
         }
@@ -1566,7 +1545,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          * a new thread on this rank.
          */
         if (mqe->flen >= sizeof(struct dtmsg_start)) {
-            start_thread(mqe, morep);
+            start_thread(mqe);
         } else {
             mlog(MGR_INFO, "process_mqe: runt start request dropped");
         }
@@ -1608,8 +1587,6 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
                 mlog(MGR_CRIT, "process_mqe: started failed sending created");
                 dtq_mqe_unalloc(mqe);
                 mqe = NULL;
-            } else {
-                *morep = 1;
             }
             dtq_req_release(req);     /* free internal START req */
         }
@@ -1624,7 +1601,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          * detach_thread() will recycle/free the mqe, so we do not free it.
          */
         if (mqe->flen >= sizeof(struct dtmsg_detach)) {
-            detach_thread(mqe, morep);
+            detach_thread(mqe);
         } else {
             mlog(MGR_INFO, "process_mqe: runt detach request dropped");
         }
@@ -1655,7 +1632,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          * will recycle/free the mqe, so we do not free it.
          */
         if (mqe->flen >= sizeof(struct dtmsg_cancel)) {
-            cancel_thread(mqe, morep);
+            cancel_thread(mqe);
         } else {
             mlog(MGR_INFO, "process_mqe: runt cancel request dropped");
         }
@@ -1686,7 +1663,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          * recycle/free the mqe, so we do not free it.
          */
         if (mqe->flen >= sizeof(struct dtmsg_join)) {
-            join_thread(mqe, morep);
+            join_thread(mqe);
         } else {
             mlog(MGR_INFO, "process_mqe: runt join request dropped");
             dtq_recv_release(mqe);
@@ -1745,7 +1722,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
             mlog(MGR_INFO, "process_mqe: drop term mqe with RUNNING state");
         } else {
             /* validated mqe request, call helper do to the work */
-            terminated_thread(&term->thread, term->finalstate, morep);
+            terminated_thread(&term->thread, term->finalstate);
         }
         dtq_recv_release(mqe);
         break;
@@ -1757,7 +1734,6 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
          */
         mlog(MGR_INFO, "mgr: received BCASTSHUTDOWN msg");
         broadcast_shutdown();
-        *morep = 1;
         dtq_recv_release(mqe);
         break;
 
@@ -1775,7 +1751,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe, int *morep) {
  * depending on the rqe type, it may or may not have a mqe (w/dtmsg)
  * attached to it.
  */
-static void process_req(dthread_request_t *rqe, int *morep) {
+static void process_req(dthread_request_t *rqe) {
     dthread_ltab_t *lt;
     struct dtq_mpiqentry *mqe;
     struct dtmsg_header *hdr;
@@ -1823,7 +1799,6 @@ static void process_req(dthread_request_t *rqe, int *morep) {
             break;
         }
         mqe = dtq_send_enqueue(mqe);
-        *morep = 1;
         if (mqe) {
             mlog(MGR_INFO, "mgr: process_req: rqe message send failed!");
             dtq_mqe_unalloc(mqe);
@@ -1910,7 +1885,6 @@ static void process_req(dthread_request_t *rqe, int *morep) {
                                "failed leaking thread!");
                 dtq_mqe_unalloc(mqe);
             } else {
-                *morep = 1;                /* just queued a msg */
                 mlog(MGR_INFO, "mgr: enqueued terminated mqe for lt=%d",
                      rqe->req_ltabidx);
             }
@@ -1936,7 +1910,6 @@ static void process_req(dthread_request_t *rqe, int *morep) {
         } else {
             mlog(MGR_INFO, "mgr0: got APP0_RET request");
             broadcast_shutdown();
-            *morep = 1;
         }
         dtq_req_release(rqe);
         break;

@@ -44,8 +44,7 @@
 /*
  * block on mgr_notify waiting for a notification if no pending work todo.
  */
-void dthread_notifywait(int *morep) {
-    int more = 0;
+void dthread_notifywait() {
     struct timespec ts;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
@@ -60,13 +59,7 @@ void dthread_notifywait(int *morep) {
                                    &dtrs->dtq.dtqlock, &ts);
         }
     }
-    if (TAILQ_FIRST(&dtrs->dtq.mpirecvq) ||
-        TAILQ_FIRST(&dtrs->dtq.mgrreqq))   /* more work to do? */
-        more++;
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
-
-    if (morep)
-        *morep = more;
 }
 
 /*
@@ -134,13 +127,11 @@ void dtq_req_enqueue(dthread_request_t *req) {
 }
 
 /*
- * dequeue and return the first req on the mgrreqq queue, if any.
- * if morep is not null, set to 1 if there is more manager work to do.
+ * dequeue and return the first req on the mgrreqq queue.
  * returns NULL if mgrreqq queue was empty.
  */
-dthread_request_t *dtq_req_dequeue(int *morep) {
+dthread_request_t *dtq_req_dequeue() {
     dthread_request_t *req;
-    int more = 0;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
     req = TAILQ_FIRST(&dtrs->dtq.mgrreqq);
@@ -148,15 +139,10 @@ dthread_request_t *dtq_req_dequeue(int *morep) {
         TAILQ_REMOVE(&dtrs->dtq.mgrreqq, req, rl);
         dtrs->dtq.mgrrqlen--;
     }
-    if (TAILQ_FIRST(&dtrs->dtq.mpirecvq) ||
-        TAILQ_FIRST(&dtrs->dtq.mgrreqq))   /* more work to do? */
-        more++;
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
 
-    if (morep)
-        *morep = more;
     if (req)
-        mlog(QUE_DBG, "req_dequeue req=%p, more=%d", req, more);
+        mlog(QUE_DBG, "req_dequeue req=%p", req);
     return(req);
 }
 
@@ -312,12 +298,10 @@ void dtq_recv_enqueue(struct dtq_mpiqentry *mqe) {
 
 /*
  * dqeueue and return the first mqe on the recv queue, if any.
- * if morep is not null, set to 1 if there is more manager work to do.
  * returns NULL if recv queue was empty.
  */
-struct dtq_mpiqentry *dtq_recv_dequeue(int *morep) {
+struct dtq_mpiqentry *dtq_recv_dequeue() {
     struct dtq_mpiqentry *mqe;
-    int more = 0;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
     mqe = TAILQ_FIRST(&dtrs->dtq.mpirecvq);
@@ -325,15 +309,10 @@ struct dtq_mpiqentry *dtq_recv_dequeue(int *morep) {
         TAILQ_REMOVE(&dtrs->dtq.mpirecvq, mqe, mql);
         dtrs->dtq.mpirqlen--;
     }
-    if (TAILQ_FIRST(&dtrs->dtq.mpirecvq) ||
-        TAILQ_FIRST(&dtrs->dtq.mgrreqq))   /* more work to do? */
-        more++;
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
 
-    if (morep)
-        *morep = more;
     if (mqe)
-        mlog(QUE_DBG, "recv_dequeue mqe=%p, more=%d", mqe, more);
+        mlog(QUE_DBG, "recv_dequeue mqe=%p", mqe);
     return(mqe);
 }
 
