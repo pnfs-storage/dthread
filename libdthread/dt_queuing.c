@@ -45,16 +45,22 @@
  * local function prototypes
  */
 static int dtq_recv_enqueue_locked(struct dtq_mpiqentry *mqe);
+static struct dtq_mpiqentry *dtq_recv_dequeue_locked(void);
+static dthread_request_t *dtq_req_dequeue_locked(void);
 
 /*
- * block on mgr_notify waiting for a notification if no pending work todo.
+ * block waiting for a notification if no pending work todo.
+ * return pending work items to caller.
  */
-void dthread_notifywait() {
+void dtq_notifywait(struct dtq_mpiqentry **mqep, dthread_request_t **reqp) {
     struct timespec ts;
+    struct dtq_mpiqentry *mqe;
+    dthread_request_t *req;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
     if (TAILQ_FIRST(&dtrs->dtq.mpirecvq) == NULL &&
         TAILQ_FIRST(&dtrs->dtq.mgrreqq) == NULL) {
+
         if (dtrs->dtq.notifytimelimit == 0) {
             pthread_cond_wait(&dtrs->dtq.mgr_notify, &dtrs->dtq.dtqlock);
         } else {
@@ -63,8 +69,16 @@ void dthread_notifywait() {
             pthread_cond_timedwait(&dtrs->dtq.mgr_notify,
                                    &dtrs->dtq.dtqlock, &ts);
         }
+
     }
+    mqe = dtq_recv_dequeue_locked();
+    req = dtq_req_dequeue_locked();
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
+
+    if (mqe || req)
+        mlog(QUE_DBG, "dtq_notifywait mqe=%p req=%p", mqe, req);
+    *mqep = mqe;
+    *reqp = req;
 }
 
 /*
@@ -134,6 +148,21 @@ void dtq_req_enqueue(dthread_request_t *req) {
 }
 
 /*
+ * dequeue and return the first req on the mgrreqq queue (w/qlock).
+ */
+static dthread_request_t *dtq_req_dequeue_locked() {
+    dthread_request_t *req;
+
+    req = TAILQ_FIRST(&dtrs->dtq.mgrreqq);
+    if (req) {
+        TAILQ_REMOVE(&dtrs->dtq.mgrreqq, req, rl);
+        dtrs->dtq.mgrrqlen--;
+    }
+
+    return(req);
+}
+
+/*
  * dequeue and return the first req on the mgrreqq queue.
  * returns NULL if mgrreqq queue was empty.
  */
@@ -141,11 +170,7 @@ dthread_request_t *dtq_req_dequeue() {
     dthread_request_t *req;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
-    req = TAILQ_FIRST(&dtrs->dtq.mgrreqq);
-    if (req) {
-        TAILQ_REMOVE(&dtrs->dtq.mgrreqq, req, rl);
-        dtrs->dtq.mgrrqlen--;
-    }
+    req = dtq_req_dequeue_locked();
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
 
     if (req)
@@ -328,18 +353,29 @@ void dtq_recv_enqueue(struct dtq_mpiqentry *mqe) {
 }
 
 /*
- * dqeueue and return the first mqe on the recv queue, if any.
+ * dqeueue and return the first mqe on the recv queue, if any (w/qlock).
+ */
+static struct dtq_mpiqentry *dtq_recv_dequeue_locked() {
+    struct dtq_mpiqentry *mqe;
+
+    mqe = TAILQ_FIRST(&dtrs->dtq.mpirecvq);
+    if (mqe) {
+        TAILQ_REMOVE(&dtrs->dtq.mpirecvq, mqe, mql);
+        dtrs->dtq.mpirqlen--;
+    }
+
+    return(mqe);
+}
+
+/*
+ * dequeue and return the first mqe on the recv queue, if any.
  * returns NULL if recv queue was empty.
  */
 struct dtq_mpiqentry *dtq_recv_dequeue() {
     struct dtq_mpiqentry *mqe;
 
     pthread_mutex_lock(&dtrs->dtq.dtqlock);
-    mqe = TAILQ_FIRST(&dtrs->dtq.mpirecvq);
-    if (mqe) {
-        TAILQ_REMOVE(&dtrs->dtq.mpirecvq, mqe, mql);
-        dtrs->dtq.mpirqlen--;
-    }
+    mqe = dtq_recv_dequeue_locked();
     pthread_mutex_unlock(&dtrs->dtq.dtqlock);
 
     if (mqe)

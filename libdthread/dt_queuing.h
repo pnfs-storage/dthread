@@ -119,7 +119,7 @@ struct dtq_state {
 };
 
 /* api function prototypes */
-void dthread_notifywait(void);
+void dtq_notifywait(struct dtq_mpiqentry **mqep, dthread_request_t **reqp);
 void dtq_notifytimelimit(int newval);
 
 dthread_request_t *dtq_req_alloc(void);

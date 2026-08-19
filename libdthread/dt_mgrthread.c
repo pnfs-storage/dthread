@@ -1405,10 +1405,10 @@ int mgr_main(int argc, char **argv) {
             break;       /* all sends complete, we can stop mpithread */
         }
 
-        dthread_notifywait();    /* blocks here if no work to do! */
+        dtq_notifywait(&mqe, &req);  /* blocks here if no work to do! */
 
         /* check for inbound messages from MPI */
-        if ((mqe = dtq_recv_dequeue()) != NULL) {
+        if (mqe) {
 
             /* handle inbound mqe messages */
             process_mqe(mqe);
@@ -1416,7 +1416,7 @@ int mgr_main(int argc, char **argv) {
         }
 
         /* check for inbound reqs */
-        if ((req = dtq_req_dequeue()) != NULL) {
+        if (req) {
 
             /* handle inbound requests */
             process_req(req);
