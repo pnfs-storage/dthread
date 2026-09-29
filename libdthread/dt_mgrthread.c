@@ -291,7 +291,7 @@ static void joinwait_end_release(struct dthread_request *rqe) {
     }
 
     mlog(MGR_DBG, "joinwait_end_release: release rqe %p", rqe);
-    dtq_req_release(rqe);
+    dtq_req_release(rqe, 1);
 }
 
 /*
@@ -671,7 +671,7 @@ static void create_thread(struct dtq_mpiqentry *mqe) {
 
 deallocate_and_error:  /* falls through to send_created_error ... */
     if (startreq)
-        dtq_req_release(startreq);
+        dtq_req_release(startreq, 0);
     if (startmqe)
         dtq_mqe_unalloc(startmqe);
     if (gidx != -1)
@@ -1534,7 +1534,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe) {
                 mlog(MGR_INFO, "mgr: CREATED: failed, seq=%d, err=%d",
                      created->hdr.xidseq, created->errstatus);
             }
-            dtq_req_release(req);     /* wakes blocked app thread */
+            dtq_req_release(req, 1);  /* wakes blocked app thread */
         }
         dtq_recv_release(mqe);    /* done with msg */
         break;
@@ -1588,7 +1588,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe) {
                 dtq_mqe_unalloc(mqe);
                 mqe = NULL;
             }
-            dtq_req_release(req);     /* free internal START req */
+            dtq_req_release(req, 0);  /* free internal START req */
         }
         if (mqe)
             dtq_recv_release(mqe);   /* only on error, o.w. recycled */
@@ -1620,7 +1620,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe) {
             mlog(MGR_INFO, "mgr: DETACHED, seq=%d, err=%d",
                  detached->hdr.xidseq, detached->errstatus);
             req->reqerror = detached->errstatus;
-            dtq_req_release(req);     /* wakes blocked app thread */
+            dtq_req_release(req, 1);  /* wakes blocked app thread */
         }
         dtq_recv_release(mqe);    /* done with msg */
         break;
@@ -1651,7 +1651,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe) {
             mlog(MGR_INFO, "mgr: CANCELED, seq=%d, err=%d",
                  canceled->hdr.xidseq, canceled->errstatus);
             req->reqerror = canceled->errstatus;
-            dtq_req_release(req);     /* wakes blocked app thread */
+            dtq_req_release(req, 1);  /* wakes blocked app thread */
         }
         dtq_recv_release(mqe);    /* done with msg */
         break;
@@ -1685,7 +1685,7 @@ static void process_mqe(struct dtq_mpiqentry *mqe) {
             req->reqerror = joined->errstatus;
             if (req->u.retval)
                 *req->u.retval = joined->joinret;  /* struct copy */
-            dtq_req_release(req);     /* wakes blocked app thread */
+            dtq_req_release(req, 1);  /* wakes blocked app thread */
         }
         dtq_recv_release(mqe);    /* done with msg */
         break;
@@ -1762,14 +1762,14 @@ static void process_req(dthread_request_t *rqe) {
         rqe != &dtrs->ltab[rqe->req_ltabidx].req) {
         /* should not happen */
         mlog(MGR_INFO, "mgr: process_req: bad request!  dropping.");
-        dtq_req_release(rqe);
+        dtq_req_release(rqe, 1);
         return;
     }
     lt = &dtrs->ltab[rqe->req_ltabidx];
     if (lt->req.reqstate != DTREQ_BUSY) {
         /* should not happen */
         mlog(MGR_INFO, "mgr: process_req: request in invalidate state!  drop");
-        dtq_req_release(rqe);
+        dtq_req_release(rqe, 1);
         return;
     }
 
@@ -1795,7 +1795,7 @@ static void process_req(dthread_request_t *rqe) {
         if (mqe == NULL) {       /* user gave us a bad rqe */
             mlog(MGR_INFO, "mgr: process_req: rqe w/o expected message mqe!");
             rqe->reqerror = EINVAL;
-            dtq_req_release(rqe);
+            dtq_req_release(rqe, 1);
             break;
         }
         mqe = dtq_send_enqueue(mqe);
@@ -1803,7 +1803,7 @@ static void process_req(dthread_request_t *rqe) {
             mlog(MGR_INFO, "mgr: process_req: rqe message send failed!");
             dtq_mqe_unalloc(mqe);
             rqe->reqerror = EIO;
-            dtq_req_release(rqe);
+            dtq_req_release(rqe, 1);
             break;
         }
         mlog(MGR_INFO, "mgr: req %p, op=%d, seq=%d: pending", rqe,
@@ -1893,7 +1893,7 @@ static void process_req(dthread_request_t *rqe) {
             ltab_free(rqe->req_ltabidx);
         }
 
-        dtq_req_release(rqe);
+        dtq_req_release(rqe, 0);  /* thread ending, no notification needed */
         break;
 
     case DTOP_APP0_RET:
@@ -1911,12 +1911,12 @@ static void process_req(dthread_request_t *rqe) {
             mlog(MGR_INFO, "mgr0: got APP0_RET request");
             broadcast_shutdown();
         }
-        dtq_req_release(rqe);
+        dtq_req_release(rqe, 0);  /* thread ending, no notification needed */
         break;
 
     default:
         mlog(MGR_INFO, "process_req: dropping unknown req %d", rqe->reqop);
-        dtq_req_release(rqe);
+        dtq_req_release(rqe, 1);
         break;
     }
 

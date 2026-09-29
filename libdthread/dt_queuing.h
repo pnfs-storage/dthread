@@ -126,7 +126,7 @@ dthread_request_t *dtq_req_alloc(void);
 
 void dtq_req_enqueue(dthread_request_t *req);
 dthread_request_t *dtq_req_dequeue(void);
-void dtq_req_release(dthread_request_t *req);
+void dtq_req_release(dthread_request_t *req, int notify);
 
 struct dtq_mpiqentry *dtq_mqe_alloc(void);
 void dtq_mqe_unalloc(struct dtq_mpiqentry *mqe);

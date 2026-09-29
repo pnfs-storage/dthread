@@ -179,9 +179,11 @@ dthread_request_t *dtq_req_dequeue() {
 }
 
 /*
- * release a dequeued req that is complete
+ * release a dequeued req that is complete.   not that 'notify'
+ * is not relevant to internal reqs (as an internal req is not
+ * tied directly to any local threads that could be waiting).
  */
-void dtq_req_release(dthread_request_t *req) {
+void dtq_req_release(dthread_request_t *req, int notify) {
     mlog(QUE_DBG, "req_release: req=%p", req);
 
     if (req->reqstate == DTREQ_INTERNAL) {
@@ -192,8 +194,12 @@ void dtq_req_release(dthread_request_t *req) {
     } else {
         /* release app thread req by notifying it that req is node */
         pthread_mutex_lock(&req->reqlock);
-        req->reqstate = DTREQ_DONE;  /* app thread moves to IDLE when done */
-        pthread_cond_signal(&req->reqnotify);
+        if (notify) {
+            req->reqstate = DTREQ_DONE;  /* app moves to IDLE when notified */
+            pthread_cond_signal(&req->reqnotify);
+        } else {
+            req->reqstate = DTREQ_IDLE;  /* no app notification needed */
+        }
         pthread_mutex_unlock(&req->reqlock);
     }
 }
