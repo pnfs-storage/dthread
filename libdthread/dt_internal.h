@@ -74,6 +74,7 @@
  */
 typedef struct {
     void *mapping;          /* virtual address we are mapped to in this rank */
+    uint64_t md_offset;     /* offset of metadata struct from mapping */
     uint64_t size;          /* size of mapping */
 } dthread_shmmap_t;
 
@@ -85,7 +86,10 @@ typedef struct {
 typedef struct {
     uint64_t seg_md_magic;      /* magic number (set when created) */
     dthread_shmref_t self;      /* describes the entire block */
-    uint64_t allocated;         /* bytes allocated in block (optional) */
+    uint64_t srcflags;          /* copy of srcflags at md setup time */
+    uintptr_t umapaddr;         /* UMAP addr (if UMAP mode, for reference) */
+    uint64_t first_avail;       /* bytes allocated in block (optional) */
+    uint64_t end_avail;         /* end of available space */
     dthread_spinlock_t slock;   /* low-level spin lock */
 } dthread_shmseg_md_t;
 
@@ -200,6 +204,7 @@ typedef struct {
     char *prog;                  /* orig argv[0] */
     int mpi_rank;                /* my rank number */
     int mpi_wsize;               /* size of MPI job */
+    MPI_Datatype mpi_uintptr;    /* type that matches uintptr_t */
     uint32_t seqsrc;             /* seq/gen# source */
     int pagesize;                /* system page size */
     pthread_key_t ltabkey;       /* key to our ltab entry */

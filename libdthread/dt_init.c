@@ -141,6 +141,22 @@ int dthread_init(int *argcp, char ***argvp) {
         MPI_Comm_size(MPI_COMM_WORLD, &dtrs->mpi_wsize)) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
+    /*
+     * MPI does not have a type for uintptr_t (MPI_AINT is for
+     * intptr_t which is signed).   find an unsigned int type
+     * that matches the size of uintptr_t.
+     */
+    if (sizeof(uintptr_t) == sizeof(unsigned long long)) {
+        dtrs->mpi_uintptr = MPI_UNSIGNED_LONG_LONG;
+    } else if (sizeof(uintptr_t) == sizeof(unsigned long)) {
+        dtrs->mpi_uintptr = MPI_UNSIGNED_LONG;
+    } else if (sizeof(uintptr_t) == sizeof(unsigned)) {
+        dtrs->mpi_uintptr = MPI_UNSIGNED;
+    } else {
+        if (dtrs->mpi_rank == 0)
+            warnx("dthread_init: no type to match uintptr_t!");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
     dtrs->seqsrc = dtrs->mpi_rank + dtrs->mpi_wsize;  /* incr by wsize */
     dtrs->pagesize = getpagesize();
@@ -261,21 +277,9 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
         fprintf(stderr, "dthread_run: %d: malloc shmmap\n", dtrs->mpi_rank);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    /* MPI_Bcast distributes shmboot, acts as a barrier to let r0 go first */
-    rv = 0;                            /* quiet compiler warning */
-    if (dtrs->mpi_rank == 0) {
-        rv = dthread_shmseg_establish(shms, nshms);
-        if (rv == 0) {
-            rv = dthread_shm_bootstrap(&shmboot, maxthreads);
-        }
-    }
-    if (MPI_Bcast(&shmboot, sizeof(shmboot), MPI_BYTE, 0, MPI_COMM_WORLD)) {
-        fprintf(stderr, "dthread_run: MPI_Bcast failed?\n");
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-    if (dtrs->mpi_rank != 0) {
-        rv = dthread_shmseg_establish(shms, nshms);
-    }
+
+    /* establish on all ranks in given order (makes collective calls) */
+    rv = dthread_shmseg_establish(shms, nshms);
     success = (rv == 0) ? 1 : 0;
     rv = MPI_Allreduce(&success, &total, 1, MPI_INT,
                        MPI_SUM, MPI_COMM_WORLD);
@@ -288,6 +292,18 @@ void dthread_run(dthread_dispatch_t *dsps, int ndsps,
         if (!dtrs->mpi_rank)
             fprintf(stderr, "dthread_run: shm_establish: %d short\n",
                     dtrs->mpi_wsize - total);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    /* rank 0 does the shm bootstrap and broadcasts result to other ranks */
+    rv = dthread_shm_bootstrap(&shmboot, maxthreads);
+    if (rv) {
+        fprintf(stderr, "dthread_run: dthread_shm_bootstrap err %d\n", rv);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    /* ensure we have we shmboot (from rank 0's bcast) before we continue */
+    if (MPI_Bcast(&shmboot, sizeof(shmboot), MPI_BYTE, 0, MPI_COMM_WORLD)) {
+        fprintf(stderr, "dthread_run: MPI_Bcast failed?\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 

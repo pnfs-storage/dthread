@@ -117,6 +117,7 @@ install (FILES "${CMAKE_CURRENT_BINARY_DIR}/dthread-config.cmake"
                "${CMAKE_CURRENT_BINARY_DIR}/dthread-config-version.cmake"
          DESTINATION share/cmake/dthread )
 install (FILES ../include/dthread/dthread.h
+               ../include/dthread/dthread_seginfo.h
                ${CMAKE_CURRENT_BINARY_DIR}/../include/dthread/dthread_config.h
          DESTINATION include/dthread)
 if (DTHREAD_MLOG_EXPORT)

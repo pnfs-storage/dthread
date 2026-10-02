@@ -26,7 +26,7 @@ memory objects or memory mapped files.
 
 Continue reading below for more information about dthread architecture
 and usage. You can use the instructions below to write new dthread
-applications or to port existing pthread programs to use dthre. 
+applications or to port existing pthread programs to use dthreads.
 Additionally, we offer an [xthread](xthread) wrapper which allows
 threaded programs to easily switch between pthread and dthread which
 can be useful for benchmarking.

@@ -127,17 +127,32 @@ typedef struct {
 #define DTHREAD_SRC_DEV    0x1   /* device file */
 #define DTHREAD_SRC_FILE   0x2   /* normal file */
 #define DTHREAD_SRC_PSHM   0x3   /* posix shm file */
-#define DTHREAD_SRC_MASK   0x3   /* source bitmask */
+#define DTHREAD_SRC_ADDR   0x4   /* virtual address (already mapped) */
+#define DTHREAD_SRC_MASK   0x7   /* source bitmask */
+#define DTHREAD_SRC_UMAP   0x8   /* use uniform mmap op (DEV/FILE/PSHM only) */
 
 /*
- * shared memory area source info.  all rank use the same source info
+ * shared memory area source info.  all ranks use the same source info
  * to establish shared memory mappings.
+ *
+ * the dthread library can optionally be configured to reserve space at the
+ * front and/or back of the shared memory area for external use using the
+ * dt_reserve_front and dt_reserve_back values (set both to zero if
+ * reserve space is not needed).  clearly dt_mmsize must be a bit greater
+ * than dt_reserve_front+dt_reserve_back in order for the dthread lib
+ * to have any remaining usable memory in the shared memory segment.
+ * dthreads will allocate its shm metadata after the reserve bytes in the
+ * front of the shared memory area (the metadata has a magic number field
+ * that ensures that the mappings are in sync across ranks.)
  */
 typedef struct {
     char *dt_src;                /* label/filename of src (depends on type) */
     uint64_t dt_srcflags;        /* info on how to interpret dt_src */
-    uint64_t dt_mmoffset;        /* offset for mmap */
-    uint64_t dt_mmsize;          /* size for mmap */
+    uint64_t dt_mmoffset;        /* offset (when using mmap) */
+    uint64_t dt_mmsize;          /* size of memory mapping */
+    void *dt_addr;               /* addr for SRC_ADDR (if already mapped) */
+    uint64_t dt_reserve_front;   /* #bytes to reserve at front of mapping */
+    uint64_t dt_reserve_back;    /* #bytes to reserve at end of mapping */
 } dthread_shmsrc_t;
 
 /*

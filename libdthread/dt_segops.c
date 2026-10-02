@@ -44,170 +44,458 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
+#include <dthread/dthread_seginfo.h>
+
 #include "dt_internal.h"
 
-static int establish(dthread_shmsrc_t *src, int idx);
+/*
+ * we expect that all shared memory mappings are done at a page
+ * level.  so the offset of data within a page will be the same
+ * across the ranks even if each rank uses a different virtual
+ * address (e.g. due to ASLR).  this also means that data alignment
+ * will match across ranks.
+ */
 
 /*
- * establish shared memory segment mappings.   return 0 on success,
- * error otherwise.
+ * macros
  */
-int dthread_shmseg_establish(dthread_shmsrc_t *shmsrctab, int n) {
-    int lcv, rv;
-    dthread_shmseg_md_t *md;
-    for (lcv = 0 ; lcv < n ; lcv++) {
-        rv = establish(&shmsrctab[lcv], lcv);
-        if (rv)
-            return(rv);
-        /* rank 0 must setup the metadata structure */
-        if (dtrs->mpi_rank == 0) {
-            md = (dthread_shmseg_md_t *) dtrs->shmmap[lcv].mapping;
-            md->seg_md_magic = DTHREAD_SEG_MD_MAGIC;
-            md->self.dt_shmid = lcv;
-            md->self.dt_offset = 0;
-            md->self.dt_length = dtrs->shmmap[lcv].size;
-            md->allocated = dtrs->pagesize;  /* reserve first page in SEG */
-            /*
-             * XXX: assume we can init md spinlock before shm malloc avail.
-             * if this does not work, we could use the remaining space
-             * in segment md page to help setup the spinlock?
-             */
-            rv = dthread_spin_init(&md->slock, DTHREAD_PROCESS_SHARED);
-            if (rv)
-                return(rv);
-        }
-    }
-    return(0);
-}
+#define close_invalidate(FDP) do {                                            \
+    close(*(FDP));                                                            \
+    *(FDP) = -1;                                                              \
+} while (0)
 
 /*
- * establish one shared memory mapping.
+ * static helper functions
  */
-static int establish(dthread_shmsrc_t *src, int idx) {
-    int rank = dtrs->mpi_rank;
-    int type = src->dt_srcflags & DTHREAD_SRC_MASK;
-    int fd, rv, flags;
-    void *mapping;
+
+/*
+ * helper function to establish setup a mapping for a shmsrc.
+ * we will create files and init metadata (if 'initialize' is set).
+ * if we use mmap, we return the open file descriptor in *fd (in
+ * case we need to move the mapping for UMAP mode).  *fd is set to -1
+ * if no file descriptor was opened.   the mapping is saved in
+ * dtrs->shmmap[idx].  returns 0 on success, error otherwise.
+ */
+static int establish(dthread_shmsrc_t *src, int idx, void *hint, int *fd,
+                     int initialize) {
+    uint64_t totalreserve, newmdoffset;
+    int type, rv, flags, pad;
+    char *newmapping, *mdptr;
     struct stat st;
+    off_t expectedsize;
+    dthread_shmseg_md_t *md;
+
+    *fd = -1;     /* initial value: no open fd (yet) */
 
     /*
-     * ensure we have at least 2 pages in a shmsrc
+     * ensure that the total reserve is not larger than our mapping.
+     * then make sure we have at least 2 pages the shmsrc beyond that.
      */
-    if (src->dt_mmsize < 2 * dtrs->pagesize) {
+    totalreserve = src->dt_reserve_front + src->dt_reserve_back;
+    if (totalreserve  >= src->dt_mmsize) {
+        mlog(SHM_ERR, "seg_establish: %s: reserve too large", src->dt_src);
+        return(EINVAL);
+    }
+    if ((src->dt_mmsize - totalreserve) < 2 * dtrs->pagesize) {
         mlog(SHM_ERR, "seg_establish: %s: segment too small", src->dt_src);
         return(EINVAL);
     }
 
     /*
-     * device files are easy, we just mmap them.
+     * determine type and switch on it.  each switch case will either
+     * directly return an error code or set 'newmapping' to point to
+     * the new shared memory mapping.  if mmap was used, the open file
+     * descriptor will be saved in *fd.
      */
-    if (type == DTHREAD_SRC_DEV) {
-        fd = open(src->dt_src, O_RDWR);
-        if (fd < 0) {
+    type = src->dt_srcflags & DTHREAD_SRC_MASK;
+    switch (type) {
+    case DTHREAD_SRC_DEV:                 /* device file (e.g. cxl dax dev) */
+        *fd = open(src->dt_src, O_RDWR);
+        if (*fd < 0) {
             rv = errno;
             mlog(SHM_ERR, "seg_establish: DEV: %s: %s", src->dt_src,
                  strerror(rv));
             return(rv);
         }
-        mapping = mmap(NULL, src->dt_mmsize, PROT_READ|PROT_WRITE, MAP_SHARED,
-                       fd, src->dt_mmoffset);
-        rv = (mapping == MAP_FAILED) ? errno : 0;
-        close(fd);
-        if (rv == 0) {       /* install mapping on success */
-            dtrs->shmmap[idx].mapping = mapping;
-            dtrs->shmmap[idx].size = src->dt_mmsize;
-            mlog(SHM_DBG, "seg_establish: %s mmap @ %p", src->dt_src,
-                 mapping);
-        } else {
+        newmapping = mmap(hint, src->dt_mmsize, PROT_READ|PROT_WRITE,
+                          MAP_SHARED, *fd, src->dt_mmoffset);
+        rv = (newmapping == MAP_FAILED) ? errno : 0;
+        if (rv) {
+            close_invalidate(fd);
             mlog(SHM_ERR, "seg_establish: mmap DEV: %s: %s", src->dt_src,
-                 strerror(rv));
-        }
-        return(rv);
-    }
-
-    /*
-     * regular files and shared memory objects get created by rank 0
-     * first, then the other ranks attach to them.  this is mainly
-     * for debugging on a single node without shared memory hardware.
-     * CXL-based shared memory hw uses a mmap'd dax device file (above).
-     *
-     * XXX: should we provide a reuse option (r0 always resets)?
-     * XXX: we currently do not unlink these files.
-     */
-    if (type == DTHREAD_SRC_FILE || type == DTHREAD_SRC_PSHM) {
-        flags = (rank == 0) ? O_RDWR|O_CREAT : O_RDWR;
-        if (type == DTHREAD_SRC_FILE)
-            fd = open(src->dt_src, flags, 0666);
-        else
-            fd = shm_open(src->dt_src, flags, 0666);
-        if (fd < 0) {
-            rv = errno;
-            mlog(SHM_ERR, "seg_establish: file: %s: %s", src->dt_src,
                  strerror(rv));
             return(rv);
         }
-        if (rank == 0) {                  /* grow file if needed */
-            if (fstat(fd, &st) < 0) {
+        mlog(SHM_DBG, "seg_establish: %s mmap-dev @ %p", src->dt_src,
+                 newmapping);
+        break;
+
+    /* these are mainly for debugging (XXX: we do not unlink the entries) */
+    case DTHREAD_SRC_FILE:                /* plain file */
+    case DTHREAD_SRC_PSHM:                /* posix shm */
+        flags = O_RDWR | ( (initialize) ? O_CREAT : 0);
+        if (type == DTHREAD_SRC_FILE)
+            *fd = open(src->dt_src, flags, 0666);
+        else
+            *fd = shm_open(src->dt_src, flags, 0666);
+        if (*fd < 0) {
+            rv = errno;
+            mlog(SHM_ERR, "seg_establish: file%d: %s: %s", type,
+                 src->dt_src, strerror(rv));
+            return(rv);
+        }
+
+        /* get file size and grow/shrink if necessary */
+        if (fstat(*fd, &st) < 0) {
+            rv = errno;
+            close_invalidate(fd);
+            mlog(SHM_ERR, "seg_establish: fstat: %s: %s", src->dt_src,
+                 strerror(rv));
+            return(rv);
+        }
+        expectedsize = src->dt_mmoffset + src->dt_mmsize;
+        if (initialize && st.st_size != expectedsize) {
+            if (ftruncate(*fd, expectedsize) < 0) {
                 rv = errno;
-                close(fd);
-                mlog(SHM_ERR, "seg_establish: fstat: %s: %s", src->dt_src,
+                close_invalidate(fd);
+                mlog(SHM_ERR, "seg_establish: ftruc: %s: %s", src->dt_src,
                      strerror(rv));
                 return(rv);
             }
-            if (st.st_size < src->dt_mmoffset + src->dt_mmsize) {
-                if (ftruncate(fd, src->dt_mmoffset + src->dt_mmsize) < 0) {
-                    rv = errno;
-                    close(fd);
-                    mlog(SHM_ERR, "seg_establish: ftruc: %s: %s", src->dt_src,
-                         strerror(rv));
-                    return(rv);
-                }
-
-            }
+        } else if (st.st_size != expectedsize) {  /* already init'd */
+            rv = EIO;
+            close_invalidate(fd);
+            mlog(SHM_ERR, "seg_establish: size-mismatch: %s: %s", src->dt_src,
+                 strerror(rv));
+            return(rv);
         }
-        mapping = mmap(NULL, src->dt_mmsize, PROT_READ|PROT_WRITE, MAP_SHARED,
-                       fd, src->dt_mmoffset);
-        rv = (mapping == MAP_FAILED) ? errno : 0;
-        close(fd);
-        if (rv == 0) {       /* install mapping on success */
-            dtrs->shmmap[idx].mapping = mapping;
-            dtrs->shmmap[idx].size = src->dt_mmsize;
-            mlog(SHM_DBG, "seg_establish: %s mmap @ %p", src->dt_src,
-                 mapping);
-        } else {
+        newmapping = mmap(hint, src->dt_mmsize, PROT_READ|PROT_WRITE,
+                          MAP_SHARED, *fd, src->dt_mmoffset);
+        rv = (newmapping == MAP_FAILED) ? errno : 0;
+        if (rv) {
+            close_invalidate(fd);
             mlog(SHM_ERR, "seg_establish: mmap file: %s: %s", src->dt_src,
                  strerror(rv));
+            return(rv);
         }
-        return(rv);
+        mlog(SHM_DBG, "seg_establish: %s mmap-file%d @ %p", src->dt_src,
+             type, newmapping);
+        break;
+
+    case DTHREAD_SRC_ADDR:                /* already mapped memory */
+        if (src->dt_srcflags & DTHREAD_SRC_UMAP) {
+            mlog(SHM_ERR, "seg_establish: SRC_ADDR w/SRC_UMAP is invalid");
+            return(EINVAL);
+        }
+        newmapping = src->dt_addr;
+        mlog(SHM_DBG, "seg_establish: %s mmap-addr @ %p", src->dt_src,
+                 newmapping);
+        break;
+
+    default:
+        mlog(SHM_ERR, "seg_establish: %s: bad type %d", src->dt_src, type);
+        return(EINVAL);
     }
 
     /*
-     * unknown SRC type
+     * we have a valid newmapping.   determine desired metadata offset
+     * and get pointer to metadata.
      */
-    mlog(SHM_ERR, "seg_establish: %s: unknown type %d", src->dt_src, type);
-    return(EINVAL);
+    mdptr = newmapping + src->dt_reserve_front;   /* add front reserve */
+    pad = ((uintptr_t) mdptr) % dtrs->pagesize;   /* page align md addr */
+    if (pad) {
+        pad = dtrs->pagesize - pad;
+        mdptr += pad;
+    }
+    newmdoffset = mdptr - newmapping;
+    md = (dthread_shmseg_md_t *) mdptr;
+
+    /*
+     * if the initialize flag is set we init the new metadata.
+     * otherwise we sanity check our metadata pointer.
+     */
+    if (initialize) {     /* set up new metadata? */
+        md->seg_md_magic = DTHREAD_SEG_MD_MAGIC;
+        md->self.dt_shmid = idx;
+        md->self.dt_offset = 0;
+        md->self.dt_length = src->dt_mmsize;
+        md->srcflags = src->dt_srcflags;
+        md->umapaddr = 0;            /* set later if in UMAP mode */
+        md->first_avail = newmdoffset + dtrs->pagesize;
+        md->end_avail = src->dt_mmsize - src->dt_reserve_back;
+        if (md->first_avail >= md->end_avail) {
+            mlog(SHM_ERR, "seg_establish: %s: not enough space!", src->dt_src);
+            rv = EINVAL;
+            goto unmap_and_fail;
+        }
+        /*
+         * XXX: assume we can init md spinlock before shm malloc avail.
+         * if this does not work, we could use the remaining space
+         * in segment md page to help setup the spinlock?
+         */
+        rv = dthread_spin_init(&md->slock, DTHREAD_PROCESS_SHARED);
+        if (rv) {
+            mlog(SHM_ERR, "seg_establish: %s: spin init fail!", src->dt_src);
+            goto unmap_and_fail;
+        }
+    } else {
+        if (md->seg_md_magic != DTHREAD_SEG_MD_MAGIC) {
+            mlog(SHM_ERR, "seg_establish: %s: failed magic check!",
+                 src->dt_src);
+            rv = EINVAL;
+            goto unmap_and_fail;
+        }
+        if (md->self.dt_shmid != idx || md->self.dt_offset != 0 ||
+            md->self.dt_length != src->dt_mmsize) {
+            mlog(SHM_ERR, "seg_establish: %s: failed self ref check!",
+                 src->dt_src);
+            rv = EINVAL;
+            goto unmap_and_fail;
+        }
+
+    }
+
+    /* success!  install new mapping info in dtrs->shmmap[] */
+    dtrs->shmmap[idx].mapping = newmapping;
+    dtrs->shmmap[idx].size = src->dt_mmsize;
+    dtrs->shmmap[idx].md_offset = newmdoffset;
+
+    return(0);
+
+unmap_and_fail:
+    if (*fd >= 0) {
+        munmap(newmapping, src->dt_mmsize);
+        close_invalidate(fd);
+    }
+    return(rv);
 }
 
 /*
- * snapshot of how much space is left in shmid segment at this time.
- * this value can change after we return (not locked by us).
+ * establish shared memory segment mappings as specified in shmsrc.
+ * makes collective MPI calls to sync up mappings across ranks.
+ * we map one segment at a time on all ranks to help us keep the
+ * virtual address mappings in sync when the UMAP option is set.
+ * caller should have already checked that n is > 0.
+ * return 0 on success, error otherwise.
  */
-int dthread_shmsegavail(uint64_t shmid, dthread_shmref_t *got) {
+int dthread_shmseg_establish(dthread_shmsrc_t *shmsrctab, int n) {
+    int lcv, fd, umap, rv, retries, i, type;
+    uintptr_t r0info[2], inmin[1], inmax[2], outmin[1], outmax[2];
+    void *hint, *mapping, *min, *max;
+    char *mdp;
     dthread_shmseg_md_t *md;
 
-    md = (shmid >= dtrs->nshmsrc) ? NULL : dtrs->shmmap[shmid].mapping;
+    for (lcv = 0 ; lcv < n ; lcv++) {
+
+        /* init vars and have rank0 establish a mapping w/initialize==1 */
+        fd = -1;
+        umap = (shmsrctab[lcv].dt_srcflags & DTHREAD_SRC_UMAP) != 0;
+        rv = 0;
+        r0info[0] = r0info[1] = 0;
+
+        if (dtrs->mpi_rank == 0) {
+            r0info[0] = establish(&shmsrctab[lcv], lcv, NULL, &fd, 1);
+            if (r0info[0]) {
+                mlog(SHM_ERR, "dthread_shmseg_establish: %s: fail %s",
+                     shmsrctab[lcv].dt_src, strerror(r0info[0]));
+            } else {
+                /* hint for UMAP mode */
+                r0info[1] = (uintptr_t) dtrs->shmmap[lcv].mapping;
+            }
+        }
+
+        /* bcast result from rank0 to all ranks, err out on failure */
+        if (MPI_Bcast(&r0info[0], 2, dtrs->mpi_uintptr, 0, MPI_COMM_WORLD)) {
+            fprintf(stderr, "dthread_shmseg_establish: MPI_Bcast fail?\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
+        /* error out if rank0 got an error */
+        if (r0info[0] != 0) {
+            rv = (int) r0info[0];
+            goto failed;
+        }
+
+        if (umap) {
+            hint = (void *)r0info[1];   /* initial hint value */
+            retries = 9;                /* retries to get uniform mapping */
+        } else {
+            hint = NULL;                /* !umap, no hint required */
+            retries = 0;
+        }
+
+retry:
+        /* all ranks without mappings should try and get one */
+        mapping = dtrs->shmmap[lcv].mapping;
+        if (mapping == NULL) {
+            if (fd == -1) {             /* no fd?  initial attempt */
+                rv = establish(&shmsrctab[lcv], lcv, hint, &fd, 0);
+                mapping = (rv) ? MAP_FAILED : dtrs->shmmap[lcv].mapping;
+            } else {
+                /* umap retry to move mapping to a uniform address */
+                mapping = mmap(hint, shmsrctab[lcv].dt_mmsize,
+                               PROT_READ|PROT_WRITE, MAP_SHARED, fd,
+                               shmsrctab[lcv].dt_mmoffset);
+                if (mapping == MAP_FAILED) {
+                    rv = errno;
+                } else {
+                    rv = 0;
+                    /* mapping changed, but not size or md_offset */
+                    dtrs->shmmap[lcv].mapping = mapping;
+                }
+            }
+            /*
+             * if mapping != MAP_FAILED, then rv==0 and the mapping
+             * is valid and has been installed in dtrs->shmmap[lcv].
+             *
+             * if mapping == MAP_FAILED, then there is an error code
+             * in rv and dtrs->shmmap[lcv].mapping is NULL.
+             */
+        }
+
+        /* use MPI to get min/max of mapping and max(rv) across all ranks */
+        inmin[0] = inmax[0] = (uintptr_t) mapping;
+        inmax[1] = rv;
+        if (MPI_Allreduce(inmin, outmin, 1, dtrs->mpi_uintptr, MPI_MIN,
+                          MPI_COMM_WORLD)) {
+            fprintf(stderr, "dthread_shmseg_establish: Allreduce MIX fail");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        if (MPI_Allreduce(inmax, outmax, 2, dtrs->mpi_uintptr, MPI_MAX,
+                          MPI_COMM_WORLD)) {
+            fprintf(stderr, "dthread_shmseg_establish: Allreduce MAX fail");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        min = (void *) outmin[0];
+        max = (void *) outmax[0];
+        rv = (int) outmax[1];
+
+        /* failed if we see an error */
+        if (min == MAP_FAILED || max == MAP_FAILED || rv != 0) {
+            if (dtrs->mpi_rank == 0)
+                mlog(SHM_ERR, "dthread_shmseg_establish: %s: fail!"
+                     "  mf=%d,rv=%d", shmsrctab[lcv].dt_src,
+                     (min == MAP_FAILED || max == MAP_FAILED), rv);
+            if (rv == 0)
+                rv = EIO;     /* no err?  make one up */
+            goto failed;
+        }
+
+        /* extra steps required for umap */
+        if (umap) {
+
+            if (min != max) {
+                /* can we retry the mapping? */
+                if (retries-- > 0) {
+                    hint = max;             /* hint to max (assume grows up) */
+                    if (mapping != hint) {  /* drop non-matching mappings */
+                        /* ignore unmap errors */
+                        munmap(mapping, shmsrctab[lcv].dt_mmsize);
+                        dtrs->shmmap[lcv].mapping = NULL;
+                    }
+                    if (dtrs->mpi_rank == 0)
+                        mlog(SHM_DBG, "dthread_shmseg_establish: %s "
+                         "retrying umap mmap", shmsrctab[lcv].dt_src);
+                    goto retry;
+                }
+
+                /* failed after retrying */
+                rv = EAGAIN;
+                if (dtrs->mpi_rank == 0)
+                    mlog(SHM_ERR, "dthread_shmseg_establish: %s "
+                         "UMAP sync fail!", shmsrctab[lcv].dt_src);
+                goto failed;
+            }
+
+            /* sucessfully umap (min == max) */
+            if (dtrs->mpi_rank == 0) {
+                /* save umap addr in metadata (for debugging) */
+                mdp = (char *)dtrs->shmmap[lcv].mapping +
+                              dtrs->shmmap[lcv].md_offset;
+                md = (dthread_shmseg_md_t *) mdp;
+                md->umapaddr = (uintptr_t) dtrs->shmmap[lcv].mapping;
+            }
+
+        }          /* umap */
+
+        close_invalidate(&fd);    /* success!  dispose of fd (if set) */
+
+    }   /* end of lcv loop */
+
+    return(0);
+
+failed:    /* release any resources we allocated and return an error */
+    close_invalidate(&fd);
+    for (i = 0 ; i <= lcv ; i++) {
+        type = shmsrctab[i].dt_srcflags & DTHREAD_SRC_MASK;
+        if (type == DTHREAD_SRC_DEV || type == DTHREAD_SRC_FILE ||
+            type == DTHREAD_SRC_PSHM) {
+            if (dtrs->shmmap[i].mapping != NULL) {
+                munmap(dtrs->shmmap[i].mapping, dtrs->shmmap[i].size);
+            }
+        }
+        memset(&dtrs->shmmap[i], 0, sizeof(dtrs->shmmap[i]));
+    }
+    return(rv);
+
+}
+
+/*
+ * get shm seginfo.   fills out sip and returns 0 on success.
+ * otherwise returns error code.
+ */
+int dthread_shm_seginfo(uint64_t shmid, dthread_seginfo_t *sip) {
+    dthread_shmseg_md_t *md;
+
+    if (shmid >= dtrs->nshmsrc)
+        return(ENOENT);
+
+    md = (dthread_shmseg_md_t *)((char *)dtrs->shmmap[shmid].mapping +
+                                         dtrs->shmmap[shmid].md_offset);
+    if (md->seg_md_magic != DTHREAD_SEG_MD_MAGIC ||
+        md->self.dt_shmid != shmid || md->self.dt_offset != 0 ||
+        md->self.dt_length != dtrs->shmmap[shmid].size) {
+        return(EINVAL);
+    }
+
+    sip->si_mapping = dtrs->shmmap[shmid].mapping;
+    sip->si_size = dtrs->shmmap[shmid].size;
+    sip->si_mdoffset = dtrs->shmmap[shmid].md_offset;
+    sip->si_srcflags = md->srcflags;
+    sip->si_umapaddr = md->umapaddr;
+    sip->si_firstavail = md->first_avail;
+    sip->si_endavail = md->end_avail;
+
+    return(0);
+}
+
+/*
+ * snapshot of how much usable space is left in shmid segment at this time.
+ * this value can change after we return (not locked by us).
+ */
+int dthread_shm_segavail(uint64_t shmid, dthread_shmref_t *got) {
+    dthread_shmseg_md_t *md;
+
+    if (shmid >= dtrs->nshmsrc) {
+        md = NULL;
+    } else {
+        md = (dthread_shmseg_md_t *)((char *)dtrs->shmmap[shmid].mapping +
+                                             dtrs->shmmap[shmid].md_offset);
+    }
+
     if (!md || md->seg_md_magic != DTHREAD_SEG_MD_MAGIC) {
         return(EINVAL);
     }
 
     if (got) {
         got->dt_shmid = shmid;
-        got->dt_offset = md->allocated;
-        if (got->dt_offset > dtrs->shmmap[shmid].size) {
-            got->dt_offset = dtrs->shmmap[shmid].size;
+        got->dt_offset = md->first_avail;
+        if (got->dt_offset > dtrs->shmmap[shmid].size ||
+            got->dt_offset > md->end_avail) {
+            got->dt_offset = md->end_avail;
             got->dt_length = 0;
         } else {
-            got->dt_length = dtrs->shmmap[shmid].size - got->dt_offset;
+            got->dt_length = md->end_avail - got->dt_offset;
         }
     }
 
@@ -226,7 +514,14 @@ void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
     uint64_t pad, total;
     void *rv = NULL;
 
-    md = (shmid >= dtrs->nshmsrc) ? NULL : dtrs->shmmap[shmid].mapping;
+    /* XXX: more sanity check? */
+    if (shmid >= dtrs->nshmsrc) {
+        md = NULL;
+    } else {
+        md = (dthread_shmseg_md_t *)((char *)dtrs->shmmap[shmid].mapping +
+                                             dtrs->shmmap[shmid].md_offset);
+    }
+
     if (!md || md->seg_md_magic != DTHREAD_SEG_MD_MAGIC) {
         mlog(SHM_ERR, "dthread_shmseg_alloc: bad seg %" PRIu64, shmid);
         return(NULL);
@@ -244,22 +539,23 @@ void *dthread_shmseg_alloc(uint64_t shmid, uint64_t want,
         return(NULL);
     }
 
-    if (md->allocated >= dtrs->shmmap[shmid].size)
+    if (md->first_avail >= dtrs->shmmap[shmid].size ||
+        md->first_avail >= md->end_avail)
         goto done;
 
     if (total == 0) {    /* use remaining space */
-        total = want = dtrs->shmmap[shmid].size - md->allocated;
-    } else if (total > dtrs->shmmap[shmid].size - md->allocated) {
+        total = want = md->end_avail - md->first_avail;
+    } else if (total > md->end_avail - md->first_avail) {
         goto done;
     }
 
-    rv = (char *)dtrs->shmmap[shmid].mapping + md->allocated;
+    rv = (char *)dtrs->shmmap[shmid].mapping + md->first_avail;
     if (ref) {
         ref->dt_shmid = shmid;
-        ref->dt_offset = md->allocated;
+        ref->dt_offset = md->first_avail;
         ref->dt_length = total;
     }
-    md->allocated += total;
+    md->first_avail += total;
 
 done:
     dthread_spin_unlock(&md->slock);
